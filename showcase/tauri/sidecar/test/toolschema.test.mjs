@@ -85,9 +85,9 @@ if (process.platform === 'darwin') {
   const actInApp = tools.find((t) => t.name === 'act_in_app').description;
   assert.match(actInApp, /youtube\.com\/results\?search_query=/);
   // ...but when the user asks for the page's own search box, it uses the box.
-  assert.match(actInApp, /unless the user asks you to use the box: then fill it/);
+  assert.match(actInApp, /unless asked to use its box \(then fill it and press return\)/);
   // Regression: a card's Delete only shows on hover, and clicking the card opened its page instead.
-  assert.match(actInApp, /only show when the pointer is over something.*\{do:'hover', text, near\}/);
+  assert.match(actInApp, /\{do:'hover', text, near\}[^.]*rests the pointer to show hidden controls/);
 }
 
 // Linux: apps are opened by name through their .desktop files.

@@ -168,6 +168,14 @@ assert.match(detailsText(undefined), /^Roamies error \? \(\?\)/, 'nothing to rep
   const no = explain('reply', new ProviderError('openai', "ChatGPT plan use isn't available for this account or workspace.", { statusCode: 403, cause: { code: 'subscription_sharing_user_not_eligible' } }));
   assert.deepEqual([no.code, no.where], ['E2D', 'model']);
   assert.equal(explain('reply', new Error('429 Too Many Requests: rate limit reached')).code, 'E24', 'other limits are unchanged');
+  // Regression (#144): Gemini's free-tier limits mention billing and were shown as an account out of credit.
+  const gem = (metric) => new Error(`You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits.\n* Quota exceeded for metric: generativelanguage.googleapis.com/${metric}, limit: 250000\nPlease retry in 37.5s. status=429`);
+  const minute = explain('reply', gem('generate_content_free_tier_input_token_count'), { who: 'Gemini' });
+  assert.equal(minute.code, 'E2F'); assert.match(minute.text, /per-minute limit/); assert.doesNotMatch(minute.text, /credit/);
+  const day = explain('reply', new Error('You exceeded your current quota, please check your plan and billing details. quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier'), { who: 'Gemini' });
+  assert.deepEqual([day.code, day.where], ['E2E', 'model']); assert.match(day.text, /daily limit/);
+  assert.equal(explain('reply', new Error('Your credit balance is too low')).code, 'E23', 'a real empty account is still out of credit');
+  assert.equal(explain('reply', new Error('429 You exceeded your current quota, please check your plan and billing details. code=insufficient_quota')).code, 'E23', "and OpenAI's, in the same words");
   const side = (await import('node:fs')).readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
   assert.match(side, /p\.where === 'chatgpt' \? `\$\{p\.text\} \$\{chatGPTUsageHelp\(\)\}`/, 'the reply says how to raise it');
   assert.match(side, /openUrl\(CHATGPT_USAGE_URL\)/, "and opens ChatGPT's usage settings");

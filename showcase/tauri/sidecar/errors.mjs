@@ -45,6 +45,10 @@ const AREAS = {
       ['E2B', /subscription_sharing_usage_unavailable/i, () => "ChatGPT couldn't check your plan usage. Try again soon."],
       ['E2C', /subscription_sharing_usage_limit_exceeded|ChatGPT usage limit reached/i, () => "ChatGPT's limit for me is used up. Raise it in ChatGPT.", false, 'chatgpt'],
       ['E2D', /subscription_sharing_user_not_eligible|ChatGPT plan use isn't available/i, () => "Your ChatGPT plan can't be used here. Use an API key.", false, 'model'],
+      // Gemini's per-minute and daily limits say "check your plan and billing details": a limit, not an empty account (#144).
+      // OpenAI's empty account says the same words with insufficient_quota, so that one stays E23.
+      ['E2E', /(?:free_tier|FreeTier)\S*(?:per_?day|PerDay)|(?:per_?day|PerDay)\S*(?:free_tier|FreeTier)/i, (c) => `${c.who}'s free daily limit is used up. Pick another model.`, false, 'model'],
+      ['E2F', /^(?![^]*insufficient_quota)[^]*check your plan and billing details/i, (c) => `${c.who}'s per-minute limit is hit. Try again in a minute.`],
       ['E23', /insufficient_quota|credit balance|billing|payment required|\b402\b/i, () => 'This account is out of credit. Top up or switch model.', false, 'model'],
       ['E24', /usage.?limit|quota|rate.?limit|\b429\b|too many requests/i, () => "I've hit this model's usage limit. Pick another model.", false, 'model'],
       ['E25', /context.{0,20}(?:length|window)|prompt is too long|too many tokens|maximum context|exceeds the available context/i, () => 'This chat got too long. Start a new one.'],
