@@ -1103,10 +1103,23 @@ fn move_sidekick_to(app: &AppHandle, x: f64, y: f64) {
     {
         let _ = w.set_position(*mon.position());
         // A pixel short, as when it was made (build_overlays).
-        let _ = w.set_size(tauri::PhysicalSize::new(mon.size().width, mon.size().height.saturating_sub(1)));
+        let size = tauri::PhysicalSize::new(mon.size().width, mon.size().height.saturating_sub(1));
+        #[cfg(target_os = "linux")]
+        fix_overlay_size(&w, size);
+        let _ = w.set_size(size);
     }
     let _ = w.eval(safe_js(&mon));
     let _ = w.eval("window.__roamieMoved&&__roamieMoved()");
+}
+
+/// Linux: the overlay's minimum and maximum size are its size. tao makes a window non-resizable only once it's up,
+/// and Mutter (GNOME) auto-maximizes a resizable window covering most of the screen as it maps; a maximized window
+/// above a fullscreen app keeps GNOME's top bar and dock up (#78). Size limits are in place before it maps.
+#[cfg(target_os = "linux")]
+fn fix_overlay_size(w: &WebviewWindow, size: tauri::PhysicalSize<u32>) {
+    let _ = w.set_max_size(None::<tauri::Size>);
+    let _ = w.set_min_size(Some(size));
+    let _ = w.set_max_size(Some(size));
 }
 
 fn build_overlays(app: &AppHandle) -> tauri::Result<()> {
@@ -1145,7 +1158,7 @@ fn build_overlays(app: &AppHandle) -> tauri::Result<()> {
         let unmanaged = linux::unmanaged_overlay();
         #[cfg(not(target_os = "linux"))]
         let unmanaged = false;
-        let w = WebviewWindowBuilder::new(app, label, WebviewUrl::App("desktop.html".into()))
+        let b = WebviewWindowBuilder::new(app, label, WebviewUrl::App("desktop.html".into()))
             .title("Roamies")
             .visible(!unmanaged)
             .transparent(true)
@@ -1162,12 +1175,18 @@ fn build_overlays(app: &AppHandle) -> tauri::Result<()> {
             .focusable(false)
             .position(pos.x, pos.y)
             .inner_size(size.width, size.height)
-            .initialization_script(init)
-            .build()?;
+            .initialization_script(init);
+        // Linux: a fixed size from the start, so it's never resizable as it maps (fix_overlay_size, #78).
+        #[cfg(target_os = "linux")]
+        let b = b.min_inner_size(size.width, size.height).max_inner_size(size.width, size.height);
+        let w = b.build()?;
         w.set_ignore_cursor_events(true)?;
         #[cfg(target_os = "linux")]
-        if unmanaged {
-            linux::set_unmanaged(&w, true, false);
+        {
+            linux::keep_unmaximized(&w);
+            if unmanaged {
+                linux::set_unmanaged(&w, true, false);
+            }
         }
         #[cfg(target_os = "macos")]
         full_frame_rate(&w);
