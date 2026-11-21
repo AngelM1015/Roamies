@@ -1,7 +1,7 @@
 {
   "updates": [
     {
-      "version": null,
+      "version": "0.1.49",
       "date": "2026-11-21",
       "items": [
         { "kind": "fixed", "title": "ChatGPT works again", "text": "Every ChatGPT and OpenAI message failed with E20. Fixed. Thanks matts-2539!" },
