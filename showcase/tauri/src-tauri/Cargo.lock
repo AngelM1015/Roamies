@@ -3002,7 +3002,7 @@ dependencies = [
 
 [[package]]
 name = "roamies"
-version = "0.1.46"
+version = "0.1.47"
 dependencies = [
  "global-hotkey",
  "gtk",

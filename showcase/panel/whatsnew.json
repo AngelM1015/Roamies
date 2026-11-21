@@ -1,8 +1,8 @@
 {
   "updates": [
     {
-      "version": null,
-      "date": "2026-11-20",
+      "version": "0.1.47",
+      "date": "2026-11-21",
       "items": [
         { "kind": "fixed", "title": "Voice on older PCs", "text": "Voice crashed at start on PCs without AVX2. It works now. Thanks Harry and waningeplayz!" },
         { "kind": "fixed", "title": "New look, new name", "text": "After switching looks mid chat, I could still think I was the old one. Not anymore." },
