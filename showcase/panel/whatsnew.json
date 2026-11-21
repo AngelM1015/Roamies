@@ -1,7 +1,7 @@
 {
   "updates": [
     {
-      "version": null,
+      "version": "0.1.48",
       "date": "2026-11-21",
       "items": [
         { "kind": "fixed", "title": "Fullscreen on GNOME", "text": "On Ubuntu Xorg, the top bar and dock stayed over fullscreen apps. Thanks sakartvelo11!" }
