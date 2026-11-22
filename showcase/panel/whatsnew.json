@@ -1,7 +1,7 @@
 {
   "updates": [
     {
-      "version": null,
+      "version": "0.1.50",
       "date": "2026-11-23",
       "items": [
         { "kind": "fixed", "title": "Your model stays your model", "text": "During a computer job, the Model page showed that job's model as yours. Fixed. Thanks!" },
