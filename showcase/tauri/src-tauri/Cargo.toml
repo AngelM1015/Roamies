@@ -2,6 +2,8 @@
 name = "roamies"
 version = "0.1.51"
 edition = "2021"
+# src/bin holds the Linux overlay host too; the Tauri CLI needs to know which binary is the app.
+default-run = "roamies"
 license = "AGPL-3.0-only"
 description = "Roamies: AI desktop companions"
 repository = "https://github.com/KenKaiii/Roamies"
