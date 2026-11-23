@@ -18,7 +18,10 @@ const INTERRUPT_GRACE_MS = 5_000; // how long interrupt() gets before the proces
 // Claude Code out of credits / not signed in → hand the prompt to llm_switcher.py,
 // which routes to local Ollama (qwen2.5-coder:7b) at zero cost so JARVIS keeps answering.
 const LLMSWITCHER = '/Users/iquit/.config/axi0/llm_switcher.py';
-const USAGE_ERROR = /(usage\s+limit|out of credits|weekly\s+limit|monthly\s+limit|quota|not logged in|unauthorized|authentication|sign in|401|403)/i;
+// Claude out of credits / not signed in / model unavailable → hand the prompt to
+// llm_switcher.py, which routes to local Ollama (qwen2.5-coder:7b) at zero cost so
+// JARVIS keeps answering.
+const USAGE_ERROR = /(usage\s+limit|out of credits|weekly\s+limit|monthly\s+limit|quota|not logged in|unauthorized|authentication|sign in|401|403|issue with the selected model|may not exist|not have access|selected model.*not|model.*(?:not found|does not exist|not available|not supported))/i;
 const INTERRUPTED_NOTE = 'Interrupted by the user before this tool call finished.';
 const STDERR_TAIL_CHARS = 4_000;
 const SYNTHETIC_MODEL = '<synthetic>';
