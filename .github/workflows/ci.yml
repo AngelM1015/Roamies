@@ -49,6 +49,14 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: node .github/scripts/check-inline-node.mjs
 
+      # The Linux hands helper is Python: at least parse it everywhere it ships from.
+      - name: Check the Linux hands helper
+        if: runner.os == 'Linux'
+        working-directory: showcase/tauri
+        run: |
+          python3 -c "compile(open('src-tauri/hands-linux/roamies-hands').read(), 'roamies-hands', 'exec')"
+          python3 src-tauri/hands-linux/roamies-hands selftest-safety
+
       # Tauri's Linux build dependencies (v2.tauri.app/start/prerequisites, Debian list).
       - name: Install Tauri system dependencies
         if: runner.os == 'Linux'
