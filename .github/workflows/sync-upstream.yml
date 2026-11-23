@@ -1,0 +1,35 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Fetch upstream KenKaiii/Roamies
+        run: |
+          git remote add upstream https://github.com/KenKaiii/Roamies.git
+          git fetch upstream main
+
+      - name: Merge upstream/main into main
+        run: |
+          git merge -m "Sync upstream KenKaiii/Roamies updates" --no-ff upstream/main || {
+            echo "Merge conflicts detected — aborting for manual review."
+            git merge --abort
+            exit 1
+          }
+
+      - name: Push to origin
+        run: git push origin main

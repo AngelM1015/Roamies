@@ -21,6 +21,8 @@
   <a href="https://www.kenkais.com"><img src="https://img.shields.io/badge/Website-kenkais.com-78ffe2?style=for-the-badge" alt="kenkais.com"></a>
 </p>
 
+<p align="center"><a href="https://github.com/KenKaiii/Roamies"><b>Made by AngelM1015 (Fork)</b></a> · original Roamies by Ken Kai</p>
+
 Roamies is a little AI buddy that lives on your desktop. It stays by your cursor, talks back in its own
 voice, keeps track of what you said you'd do and nudges you when it's due.
 
