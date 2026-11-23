@@ -49,8 +49,8 @@ const AREAS = {
       // OpenAI's empty account says the same words with insufficient_quota, so that one stays E23.
       ['E2E', /(?:free_tier|FreeTier)\S*(?:per_?day|PerDay)|(?:per_?day|PerDay)\S*(?:free_tier|FreeTier)/i, (c) => `${c.who}'s free daily limit is used up. Pick another model.`, false, 'model'],
       ['E2F', /^(?![^]*insufficient_quota)[^]*check your plan and billing details/i, (c) => `${c.who}'s per-minute limit is hit. Try again in a minute.`],
-      ['E23', /insufficient_quota|credit balance|billing|payment required|\b402\b/i, () => 'This account is out of credit. Top up or switch model.', false, 'model'],
-      ['E24', /usage.?limit|quota|rate.?limit|\b429\b|too many requests/i, () => "I've hit this model's usage limit. Pick another model.", false, 'model'],
+      ['E23', /insufficient_quota|credit balance|billing|payment required|\b402\b|out of credits|usage credits/i, () => 'This account is out of credit. Top up or switch model.', false, 'model'],
+      ['E24', /usage.?limit|quota|rate.?limit|\b429\b|too many requests|weekly limit|fable limit|reached your.*limit/i, () => "I've hit this model's usage limit. Pick another model.", false, 'model'],
       ['E25', /context.{0,20}(?:length|window)|prompt is too long|too many tokens|maximum context|exceeds the available context/i, () => 'This chat got too long. Start a new one.'],
       ['E26', /model_not_found|model.{0,40}(?:not found|does not exist|not available|not supported)/i, () => "That model isn't available. Pick another one.", false, 'model'],
       // A model on this computer (Ollama, LM Studio) that didn't load or ran out of memory (#107). Before E28: Ollama's
