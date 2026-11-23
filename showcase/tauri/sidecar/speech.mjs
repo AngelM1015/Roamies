@@ -137,6 +137,12 @@ export function speakable(text) {
     .replace(/(?:^|\s)(?:~|\/)?(?:[\w.-]+\/){2,}[\w-]*(?:\.\w+)*/g, ' ') // file paths (the sentence's full stop stays)
     .replace(/\[([^\]]{1,40})\]/g, (m, inner, at, all) => (IS_CUE.test(m) || (LOOSE.test(m) && SENTENCE_START.test(all.slice(0, at))) ? m.toLowerCase() : inner)) // voice cues stay; [placeholders] lose their brackets (Fish would act them out)
     .replace(/[\s\S]+/, mathWords)
+    // Strip technical leakage before TTS: commit hashes (need at least one digit so 'defaced' survives),
+    // env var names (need an underscore so JARVIS / OK survive), proc_* IDs, and ALL CAPS dumps.
+    .replace(/\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/g, '')                      // commit-ish hashes
+    .replace(/\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b/g, '')                          // env var names
+    .replace(/\bproc_[A-Za-z0-9]+\b/g, '')                                    // process/session IDs
+    .replace(/\b[A-Z]{4,}[A-Z0-9_ ]{4,}\b/g, '')                            // ALL CAPS technical dumps
     .replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{FE0F}\u{200D}\u{20E3}]/gu, '')
     .replace(/\(\s*\)|\[\s*\]/g, '')
     .replace(/\s+([,.!?;:])/g, '$1')

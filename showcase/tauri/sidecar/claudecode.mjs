@@ -399,7 +399,13 @@ async function llmSwitcherReply(promptText) {
     let out = '', err = '';
     py.stdout.on('data', (d) => (out += d));
     py.stderr.on('data', (d) => (err += d));
-    py.on('close', (code) => code === 0 ? resolve(out.trim()) : reject(new Error(err || `llm_switcher exited ${code}`)));
+    py.on('close', (code) => {
+      if (code !== 0) { reject(new Error(err || `llm_switcher exited ${code}`)); return; }
+      try {
+        const parsed = JSON.parse(out);
+        resolve((parsed && typeof parsed.body === 'string') ? parsed.body.trim() : out.trim());
+      } catch { resolve(out.trim()); }
+    });
   });
 }
 
