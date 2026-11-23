@@ -15,6 +15,10 @@ const DEFAULT_TOOL_TIMEOUT_MS = 300_000;
 const SERVER_TIMEOUT_MARGIN_MS = 60_000;
 const MAX_SEED_CHARS = 400_000;
 const INTERRUPT_GRACE_MS = 5_000; // how long interrupt() gets before the process is killed
+// Claude Code out of credits / not signed in → hand the prompt to llm_switcher.py,
+// which routes to local Ollama (qwen2.5-coder:7b) at zero cost so JARVIS keeps answering.
+const LLMSWITCHER = '/Users/iquit/.config/axi0/llm_switcher.py';
+const USAGE_ERROR = /(usage\s+limit|out of credits|weekly\s+limit|monthly\s+limit|quota|not logged in|unauthorized|authentication|sign in|401|403)/i;
 const INTERRUPTED_NOTE = 'Interrupted by the user before this tool call finished.';
 const STDERR_TAIL_CHARS = 4_000;
 const SYNTHETIC_MODEL = '<synthetic>';
@@ -386,6 +390,27 @@ function takeSpare(o, resume) {
   return null;
 }
 
+// Claude Code out of credits / not signed in → hand the prompt to llm_switcher.py,
+// which routes to local Ollama (qwen2.5-coder:7b) at zero cost so JARVIS keeps answering.
+async function llmSwitcherReply(promptText) {
+  const { spawn } = await import('node:child_process');
+  return new Promise((resolve, reject) => {
+    const py = spawn('python3', [LLMSWITCHER, '--context=complex', promptText]);
+    let out = '', err = '';
+    py.stdout.on('data', (d) => (out += d));
+    py.stderr.on('data', (d) => (err += d));
+    py.on('close', (code) => code === 0 ? resolve(out.trim()) : reject(new Error(err || `llm_switcher exited ${code}`)));
+  });
+}
+
+// Returns fallback reply text when the error is a usage/credit/auth limit, else null.
+async function usageFallback(error, promptText) {
+  const msg = String(error ?? '');
+  if (!USAGE_ERROR.test(msg)) return null;
+  try { return (await llmSwitcherReply(promptText)) || null; }
+  catch { return null; }
+}
+
 // One run: `messages` ends with the pending user turn(s); assistant and tool messages are appended to it.
 async function* claudeCodeLoop(messages, o) {
   const channel = new Channel();
@@ -396,6 +421,7 @@ async function* claudeCodeLoop(messages, o) {
   const first = messages.slice(start).flatMap((m) => toSdkUserContent(m.content));
   if (!o.resume && prior.some((m) => m.role !== 'system')) first.unshift({ type: 'text', text: renderTranscript(prior, MAX_SEED_CHARS) });
   if (!first.length) first.push({ type: 'text', text: 'Continue.' });
+  const promptText = first.filter((p) => p.type === 'text').map((p) => p.text).join('\n');
 
   // A warm spare if one was started for exactly this; else (or if it turns out dead) a fresh process.
   const link = { signal: o.signal, onEvent: (event) => channel.push({ kind: 'event', event }), stderr: (d) => { stderrTail = (stderrTail + d).slice(-STDERR_TAIL_CHARS); } };
@@ -438,7 +464,10 @@ async function* claudeCodeLoop(messages, o) {
       if (item.kind === 'end') break;
       if (item.kind === 'error') {
         if (aborted || isAbortLike(item.error)) break;
-        throw item.error instanceof Error ? item.error : new Error(String(item.error));
+        const errA = item.error instanceof Error ? item.error : new Error(String(item.error));
+        const fbA = await usageFallback(errA, promptText);
+        if (fbA) { yield { type: 'text_delta', text: fbA }; break; }
+        throw errA;
       }
       const message = item.message;
       // After Stop, keep the transcript in step until Claude Code reports the interrupted result, but stop emitting.
@@ -447,9 +476,17 @@ async function* claudeCodeLoop(messages, o) {
       if (message.subtype === 'error_max_turns') { hitMaxTurns = true; break; }
       if (message.subtype !== 'success') {
         const detail = (message.errors ?? []).join('\n') || mapper.syntheticError || stderrTail.trim();
-        throw new Error(detail || `Claude Code stopped: ${message.subtype}`);
+        const errB = new Error(detail || `Claude Code stopped: ${message.subtype}`);
+        const fbB = await usageFallback(errB, promptText);
+        if (fbB) { yield { type: 'text_delta', text: fbB }; break; }
+        throw errB;
       }
-      if (message.is_error) throw new Error(message.result || mapper.syntheticError || 'Claude Code request failed.');
+      if (message.is_error) {
+        const errC = new Error(message.result || mapper.syntheticError || 'Claude Code request failed.');
+        const fbC = await usageFallback(errC, promptText);
+        if (fbC) { yield { type: 'text_delta', text: fbC }; break; }
+        throw errC;
+      }
       break;
     }
   } finally {
