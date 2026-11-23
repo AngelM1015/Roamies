@@ -51,7 +51,8 @@
       const cyw = Math.cos(yaw), syw = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
       // Squash from the body's bounces, and a pulse out when it hears or speaks.
       const sx = 1 + st.sq * 0.05, sy = 1 - st.sq * 0.04;
-      const shake = A === 'upset' && st.actA % 0.9 < 0.32 ? Math.sin(t * 48) * 0.6 : 0;
+      // Upset (or a voice that's angry or shouting): a tremor.
+      const shake = A === 'upset' && st.actA % 0.9 < 0.32 ? Math.sin(t * 48) * 0.6 : st.feel === 'angry' || st.feel === 'shout' ? Math.sin(t * 48) * 0.35 : 0;
       const breath = 1 + (st.sleepy > 0.5 ? 0.03 : 0.015) * Math.sin(t * 1.4);
       const wavy = mode === 'talk' || mode === 'listen' ? v : A === 'hype' ? 0.7 : 0.12;
       for (const p of dots) {
@@ -69,7 +70,8 @@
       }
       // The heart: a bright core that swells with the voice; it dims to a dot asleep and closes on a blink.
       const open = st.open, sleepy = st.sleepy > 0.5;
-      const hr = Math.max(1, Math.round(rad * (sleepy ? 0.1 : 0.17 + v * 0.07) * (A === 'hype' ? 1.25 : 1)));
+      const low = st.feel === 'sad' || st.feel === 'cry' || st.feel === 'tired'; // a sad voice: the heart shrinks
+      const hr = Math.max(1, Math.round(rad * (sleepy ? 0.1 : 0.17 + v * 0.07) * (A === 'hype' ? 1.25 : low ? 0.75 : 1)));
       const hx = Math.round(cx + st.look[0] * rad * 0.18), hy = Math.round(cy + st.look[1] * rad * 0.14);
       const hh = Math.max(0, Math.round(hr * (st.wide > 0.5 ? 1.25 : Math.min(1, open))));
       for (let y = -hr - 1; y <= hr + 1; y++) for (let x = -hr - 1; x <= hr + 1; x++) {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { StudioVoice, studioStatus, studioUrl, plain, STUDIO_DEFAULT_URL } from '../voicestudio.mjs';
+import { StudioVoice, studioStatus, studioUrl, plain, STUDIO_DEFAULT_URL, SENTENCE_TIMEOUT, FIRST_SENTENCE_TIMEOUT } from '../voicestudio.mjs';
 
 // Status: a stand-in for VoiceStudio's HTTP API on a random loopback port; `mode` changes how it answers.
 const api = { mode: 'ready' };
@@ -87,6 +87,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const { v } = run({ voice: null });
   v.open(); FakeWS.last.open(); v.say('Hi.');
   assert.deepEqual(FakeWS.last.sent, [{ text: 'Hi.' }]);
+  v.abort(); // its sentence timer would hold the process open
 }
 { // Not running: an "offline" error before any audio.
   const { v, got } = run();
@@ -116,12 +117,31 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   assert.deepEqual(got.audio, [[1, 0]]); assert.equal(ws.sent.length, 1); assert.equal(got.ended, 0); assert.equal(got.errors.length, 0);
 }
 { // Silence for too long mid-sentence: a timeout, not a hang.
-  const { v, got } = run({ sentenceTimeout: 20 });
+  const { v, got } = run({ sentenceTimeout: 20, firstSentenceTimeout: 20 });
   v.open(); FakeWS.last.open(); v.say('Hi.');
   await sleep(40);
   assert.equal(got.errors[0]?.reason, 'timeout');
 }
 { // end() with nothing said: ends at once, no socket needed.
   const { v, got } = run(); v.end(); assert.equal(got.ended, 1);
+}
+{ // The first sentence of a socket may be a cold start: it gets the longer limit, later sentences the normal one.
+  assert.equal(SENTENCE_TIMEOUT, 90_000); assert.equal(FIRST_SENTENCE_TIMEOUT, 150_000);
+  const { v, got } = run({ sentenceTimeout: 20, firstSentenceTimeout: 60 });
+  v.open(); const ws = FakeWS.last; ws.open(); v.say('One.'); v.say('Two.'); v.end();
+  await sleep(40);
+  assert.equal(got.errors.length, 0, 'the first sentence waits longer than the later ones');
+  ws.json({ type: 'done' });
+  assert.deepEqual(ws.sent[1], { text: 'Two.', voice: 'fa08aff1' });
+  await sleep(40);
+  assert.equal(got.errors[0]?.reason, 'timeout', 'a later sentence keeps the shorter limit');
+}
+{ // Defaults: 150 s for a socket's first sentence, 90 s after it.
+  const { v } = run();
+  v.open(); FakeWS.last.open(); v.say('Hi.');
+  assert.equal(v.limit, 150_000);
+  FakeWS.last.json({ type: 'done' }); v.say('Again.');
+  assert.equal(v.limit, 90_000);
+  v.abort();
 }
 console.log('voicestudio tests: passed');

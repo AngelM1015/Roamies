@@ -127,30 +127,48 @@ func speechLocaleCandidates() -> [Locale] {
 // in that language's main region when the user's region isn't offered (en-BR → en-US).
 func legacySpeechLocale() -> Locale? {
     let supported = SFSpeechRecognizer.supportedLocales().sorted { $0.identifier < $1.identifier }
-    func key(_ id: String) -> String { id.replacingOccurrences(of: "-", with: "_").lowercased() }
     for want in speechLocaleCandidates() {
-        if let hit = supported.first(where: { key($0.identifier) == key(want.identifier) }) { return hit }
-        let lang = key(want.identifier).split(separator: "_").first.map(String.init) ?? ""
-        let same = supported.filter { key($0.identifier).split(separator: "_").first.map(String.init) == lang }
+        if let hit = supported.first(where: { speechKey($0.identifier) == speechKey(want.identifier) }) { return hit }
+        let lang = speechKey(want.identifier).split(separator: "_").first.map(String.init) ?? ""
+        let same = supported.filter { speechKey($0.identifier).split(separator: "_").first.map(String.init) == lang }
         if same.isEmpty { continue }
         if #available(macOS 13, *), let region = Locale.Language(identifier: lang).maximalIdentifier.split(separator: "-").last,
-           let main = same.first(where: { key($0.identifier) == "\(lang)_\(region.lowercased())" }) { return main }
+           let main = same.first(where: { speechKey($0.identifier) == "\(lang)_\(region.lowercased())" }) { return main }
         return same.first
     }
     return nil
+}
+
+// Compares locale ids loosely: "ar-SA", "ar_sa" and "AR-sa" are the same.
+func speechKey(_ id: String) -> String { id.replacingOccurrences(of: "-", with: "_").lowercased() }
+
+// The older recogniser's locale for an explicit speech language such as "ar-SA": the same id, else the first
+// offered locale in that language (ar → ar_SA or whichever Apple lists first). nil when none is offered.
+func legacyLocale(for id: String) -> Locale? {
+    let supported = SFSpeechRecognizer.supportedLocales().sorted { $0.identifier < $1.identifier }
+    let want = speechKey(id)
+    if let hit = supported.first(where: { speechKey($0.identifier) == want }) { return hit }
+    let lang = want.split(separator: "_").first.map(String.init) ?? ""
+    return supported.first(where: { speechKey($0.identifier).split(separator: "_").first.map(String.init) == lang })
 }
 
 // macOS 26+: SpeechAnalyzer + SpeechTranscriber. Model assets are shared system-wide and
 // downloaded on first use; the locale and audio format are resolved once and reused.
 @available(macOS 26, *)
 final class AnalyzerRecognizer: Recognizer {
-    private static var prepared: Task<(Locale, AVAudioFormat?), Error>?
-    static func prepare() -> Task<(Locale, AVAudioFormat?), Error> {
-        if let p = prepared { return p }
+    // One prepared task per locale (nil: the user's own languages, as before).
+    private static var prepared: [String: Task<(Locale, AVAudioFormat?), Error>] = [:]
+    static func prepare(locale given: Locale? = nil) -> Task<(Locale, AVAudioFormat?), Error> {
+        let cacheKey = given?.identifier ?? ""
+        if let p = prepared[cacheKey] { return p }
         let t = Task { () throws -> (Locale, AVAudioFormat?) in
             var locale: Locale?
-            for want in speechLocaleCandidates() where locale == nil {
-                locale = await SpeechTranscriber.supportedLocale(equivalentTo: want)
+            if let given {
+                locale = await SpeechTranscriber.supportedLocale(equivalentTo: given)
+            } else {
+                for want in speechLocaleCandidates() where locale == nil {
+                    locale = await SpeechTranscriber.supportedLocale(equivalentTo: want)
+                }
             }
             let resolved = locale ?? Locale(identifier: "en-US")
             let probe = SpeechTranscriber(locale: resolved, preset: .progressiveTranscription)
@@ -162,7 +180,7 @@ final class AnalyzerRecognizer: Recognizer {
             log("speech analyzer ready: \(resolved.identifier) \(format.map { "\($0.sampleRate)Hz" } ?? "native")")
             return (resolved, format)
         }
-        prepared = t
+        prepared[cacheKey] = t
         return t
     }
 
@@ -170,13 +188,14 @@ final class AnalyzerRecognizer: Recognizer {
     private var work: Task<Void, Never>?
     private var finalized = "", volatile = ""
 
-    init(_ cb: RecognizerCallbacks) {
+    init(_ cb: RecognizerCallbacks, locale: Locale? = nil) {
         let (stream, cont) = AsyncStream<AVAudioPCMBuffer>.makeStream()
         raw = cont
+        let wanted = locale
         work = Task { [weak self] in
             var analyzer: SpeechAnalyzer?, reader: Task<Void, Error>?
             do {
-                let (locale, format) = try await Self.prepare().value
+                let (locale, format) = try await Self.prepare(locale: wanted).value
                 let tr = SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
                 let a = SpeechAnalyzer(modules: [tr])
                 analyzer = a
@@ -268,8 +287,10 @@ final class LegacyRecognizer: Recognizer {
     private var task: SFSpeechRecognitionTask?
 
     /// onDeviceOnly: nil rather than sending audio to Apple's servers (wake listening, which hears everything).
-    init?(_ cb: RecognizerCallbacks, onDeviceOnly: Bool = false) {
-        guard let rec = legacySpeechLocale().flatMap({ SFSpeechRecognizer(locale: $0) }) ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US")), rec.isAvailable else { return nil }
+    /// locale: the explicit speech language's locale; nil keeps the automatic choice (the user's own languages).
+    init?(_ cb: RecognizerCallbacks, onDeviceOnly: Bool = false, locale: Locale? = nil) {
+        let explicit = locale.flatMap { SFSpeechRecognizer(locale: $0) }
+        guard let rec = explicit ?? legacySpeechLocale().flatMap({ SFSpeechRecognizer(locale: $0) }) ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US")), rec.isAvailable else { return nil }
         if onDeviceOnly && !rec.supportsOnDeviceRecognition { return nil }
         req.shouldReportPartialResults = true
         if rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
@@ -401,6 +422,18 @@ enum InputDevice {
     static func forWake() -> AudioDeviceID? {
         guard let dev = defaultInput(), let t = transport(dev), t == kAudioDeviceTransportTypeBluetooth || t == kAudioDeviceTransportTypeBluetoothLE else { return nil }
         return all().first { transport($0) == kAudioDeviceTransportTypeBuiltIn && hasInput($0) }
+    }
+    /// The default input as this process sees it now, if it's a live mic.
+    static func current() -> AudioDeviceID? { defaultInput().flatMap { hasInput($0) ? $0 : nil } }
+    static func builtIn() -> AudioDeviceID? { all().first { transport($0) == kAudioDeviceTransportTypeBuiltIn && hasInput($0) } }
+    /// The mics a take tries, in order. AVAudioEngine's input unit is shared by the whole process, and once it's stuck
+    /// on a mic that went away (an iPhone's Continuity mic dropping out) every new engine fails on it until a restart;
+    /// naming a live mic unsticks it. Automatic tries the system's choice, then the default by name, then the built-in.
+    static func tries(picked: AudioDeviceID?, current: AudioDeviceID?, builtIn: AudioDeviceID?) -> [AudioDeviceID?] {
+        if picked != nil { return [picked] }
+        var out: [AudioDeviceID?] = [nil]
+        for d in [current, builtIn] { if let d, !out.contains(d) { out.append(d) } }
+        return out
     }
     static func use(_ dev: AudioDeviceID, on input: AVAudioInputNode) -> Bool {
         guard let unit = input.audioUnit else { return false }
@@ -592,6 +625,70 @@ final class Voice {
     private var wakeWords = 0 // how many words the wake phrase took, in the take it started
     private var useAnalyzer: Bool { if #available(macOS 26, *) { return SpeechTranscriber.isAvailable } else { return false } }
 
+    // The speech language for takes: "auto" follows the Mac's language list; otherwise a locale id such as "ar-SA" ({"cmd":"lang"}).
+    var speechLang = "auto"
+    // Whether SpeechAnalyzer has speechLang (macOS 26+); nil until checked. Only read while speechLang is explicit.
+    private var langOnAnalyzer: Bool?
+
+    /// Which recogniser a take uses. Wake listening always takes the automatic choice, as before. An explicit speech
+    /// language goes to SpeechAnalyzer when it has it, else to SFSpeechRecognizer with that exact locale. The automatic
+    /// choice has a nil locale, which keeps each recogniser's own default.
+    func takeEngine() -> (analyzer: Bool, locale: Locale?) {
+        let automatic = (analyzer: useAnalyzer, locale: nil as Locale?)
+        guard phase != .wake, speechLang != "auto" else { return automatic }
+        if langOnAnalyzer == true { return (true, Locale(identifier: speechLang)) }
+        if langOnAnalyzer == false, let loc = legacyLocale(for: speechLang) { return (false, loc) }
+        return automatic
+    }
+
+    /// {"cmd":"lang"}: sets the speech language ("auto" or "" = the Mac's own languages) and tells the app which engine has it.
+    func setSpeechLang(_ id: String) {
+        let trimmed = id.trimmingCharacters(in: .whitespaces)
+        speechLang = trimmed.isEmpty ? "auto" : trimmed
+        langOnAnalyzer = nil
+        let asked = speechLang
+        guard asked != "auto" else { return resolveLang() }
+        if #available(macOS 26, *), SpeechTranscriber.isAvailable {
+            let want = Locale(identifier: asked)
+            Task {
+                let ok = await SpeechTranscriber.supportedLocale(equivalentTo: want) != nil
+                DispatchQueue.main.async {
+                    guard self.speechLang == asked else { return } // changed again while this was checked
+                    self.langOnAnalyzer = ok
+                    if ok { _ = AnalyzerRecognizer.prepare(locale: want) } // fetch the model now, not on the first take
+                    self.resolveLang()
+                }
+            }
+        } else {
+            langOnAnalyzer = false
+            resolveLang()
+        }
+    }
+
+    // Logs and tells the app which engine the current speech language uses, and whether that engine sends audio to Apple.
+    private func resolveLang() {
+        let id = speechLang
+        var engine = "none"
+        var locale: Locale?
+        if id == "auto" {
+            engine = useAnalyzer ? "analyzer" : "sfspeech"
+        } else if langOnAnalyzer == true {
+            engine = "analyzer"
+        } else if let loc = legacyLocale(for: id) {
+            engine = "sfspeech"
+            locale = loc
+        } else {
+            log("speech language \(id) isn't offered by either recogniser; using automatic")
+        }
+        var online = false
+        if engine == "sfspeech" {
+            let rec = SFSpeechRecognizer(locale: locale ?? legacySpeechLocale() ?? Locale(identifier: "en-US"))
+            online = rec?.supportsOnDeviceRecognition != true
+        }
+        log("speech language \(id): \(engine)")
+        emit(["type": "lang", "id": id, "engine": engine, "online": online])
+    }
+
     init() {
         // Resolve the locale and fetch the model up front so the first ⌃⌥ is instant.
         if #available(macOS 26, *), SpeechTranscriber.isAvailable { _ = AnalyzerRecognizer.prepare() }
@@ -743,11 +840,14 @@ final class Voice {
         if dryRun { best = ProcessInfo.processInfo.environment["ROAMIES_VOICE_DRYRUN_TEXT"] ?? ""; return }
         // Already allowed: start the mic now so the first word isn't lost. Otherwise wait until
         // the press is clearly a talk (hold or tap), so shortcuts like ⌃⌥S never trigger a prompt.
-        if authorized { startAudio(device: InputDevice.picked()) }
+        if authorized() { startAudio(device: InputDevice.picked()) }
     }
 
-    private var authorized: Bool {
-        LiveTest.url != nil || AVCaptureDevice.authorizationStatus(for: .audio) == .authorized && (useAnalyzer || SFSpeechRecognizer.authorizationStatus() == .authorized)
+    // Whether the recogniser needs Speech Recognition permission: a take's (its speech language decides), or the wake word's.
+    private func needsSpeechPermission(wake: Bool = false) -> Bool { wake ? !useAnalyzer : !takeEngine().analyzer }
+
+    private func authorized(wake: Bool = false) -> Bool {
+        LiveTest.url != nil || AVCaptureDevice.authorizationStatus(for: .audio) == .authorized && (!needsSpeechPermission(wake: wake) || SFSpeechRecognizer.authorizationStatus() == .authorized)
     }
 
     private func showListening(_ mode: String, _ now: Double) {
@@ -791,6 +891,8 @@ final class Voice {
 
     private func finalize() {
         guard phase == .finishing else { return }
+        // An error or final result can land before the tail timer fires; its stop must still happen.
+        stopAudio()
         finishTimer?.invalidate(); finishTimer = nil
         rec?.cancel(); rec = nil
         phase = .idle
@@ -865,7 +967,7 @@ final class Voice {
 
     // Never asks for permission: wake listening starts only once talking has been allowed.
     private func wakeAllowed(_ now: Double) -> Bool {
-        wakeOn && !wakeHold && !dryRun && now >= wakeCooldownUntil && now >= wakeRetryAt && authorized
+        wakeOn && !wakeHold && !dryRun && now >= wakeCooldownUntil && now >= wakeRetryAt && authorized(wake: true)
     }
 
     private func startWake(_ now: Double) {
@@ -944,9 +1046,10 @@ final class Voice {
     private func ensureAuthorized(_ then: @escaping () -> Void) {
         let mic = AVCaptureDevice.authorizationStatus(for: .audio)
         let speech = SFSpeechRecognizer.authorizationStatus()
-        if mic == .authorized && (useAnalyzer || speech == .authorized) { then(); return }
+        let needsSpeech = needsSpeechPermission()
+        if mic == .authorized && (!needsSpeech || speech == .authorized) { then(); return }
         if mic == .denied || mic == .restricted { return denied("microphone") }
-        if speech == .denied || speech == .restricted { return denied("speech") }
+        if needsSpeech && (speech == .denied || speech == .restricted) { return denied("speech") }
         if authorizing { return }
         authorizing = true
         AVCaptureDevice.requestAccess(for: .audio) { micOK in
@@ -954,7 +1057,7 @@ final class Voice {
                 DispatchQueue.main.async { self.authorizing = false; self.denied("microphone") }
                 return
             }
-            if self.useAnalyzer { DispatchQueue.main.async { self.authorizing = false; then() }; return }
+            if !needsSpeech { DispatchQueue.main.async { self.authorizing = false; then() }; return }
             SFSpeechRecognizer.requestAuthorization { status in
                 DispatchQueue.main.async {
                     self.authorizing = false
@@ -981,7 +1084,12 @@ final class Voice {
             },
             onError: { [weak self] err in guard let self, self.rec === mine else { return }; self.onError(err) }
         )
-        if #available(macOS 26, *), useAnalyzer { mine = AnalyzerRecognizer(cb) } else { mine = LegacyRecognizer(cb, onDeviceOnly: phase == .wake) }
+        let engine = takeEngine()
+        if phase != .wake { // one line per take, not per wake window
+            let shown = engine.locale?.identifier ?? (engine.analyzer ? "auto" : legacySpeechLocale()?.identifier ?? "auto")
+            log("speech: \(engine.analyzer ? "analyzer" : "sfspeech") \(shown)")
+        }
+        if #available(macOS 26, *), engine.analyzer { mine = AnalyzerRecognizer(cb, locale: engine.locale) } else { mine = LegacyRecognizer(cb, onDeviceOnly: phase == .wake, locale: engine.locale) }
         return mine
     }
 
@@ -995,10 +1103,10 @@ final class Voice {
         }
         if engine != nil { stopAudio(close: true) }
         // Wake listening fails quietly and tries again later; a take tells the user.
-        let fail = { (code: String) in
-            if self.phase == .wake { self.phase = .idle; self.wakeRetryAt = uptime() + 30; wakeLog("couldn't start (\(code))") } else { emit(["type": "error", "code": code]); self.cancel() }
+        let fail = { (code: String, extra: [String: Any]) in
+            if self.phase == .wake { self.phase = .idle; self.wakeRetryAt = uptime() + 30; wakeLog("couldn't start (\(code))") } else { emit(["type": "error", "code": code].merging(extra) { a, _ in a }); self.cancel() }
         }
-        guard let r = makeRecognizer() else { return fail("unavailable") }
+        guard let r = makeRecognizer() else { return fail("unavailable", [:]) }
         let gain = autoGain, feed = feed
         let ingest = { [weak self] (buffer: AVAudioPCMBuffer) in
             guard let samples = buffer.floatChannelData?[0] else { feed.append(buffer); return }
@@ -1014,24 +1122,32 @@ final class Voice {
         }
         if LiveTest.url != nil { feed.set(r); rec = r; LiveTest.sink = ingest; return }
 
-        let eng = AVAudioEngine()
-        let input = eng.inputNode
-        if let device, !InputDevice.use(device, on: input) { log("couldn't switch to mic \(device)") }
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            r.cancel()
-            return fail("no_input")
-        }
         feed.set(r)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in ingest(buffer) }
-        do {
-            eng.prepare()
-            try eng.start()
-        } catch {
-            log("engine start failed: \(error)")
+        var started: AVAudioEngine?, problem: String?
+        for dev in InputDevice.tries(picked: device, current: InputDevice.current(), builtIn: InputDevice.builtIn()) {
+            let eng = AVAudioEngine()
+            let input = eng.inputNode
+            if let dev, !InputDevice.use(dev, on: input) { log("couldn't switch to mic \(dev)"); continue }
+            let format = input.outputFormat(forBus: 0)
+            guard format.sampleRate > 0, format.channelCount > 0 else { continue }
+            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in ingest(buffer) }
+            do {
+                eng.prepare()
+                try eng.start()
+                if dev != device { log("mic opened on device \(dev ?? 0) after the default one failed") }
+                started = eng
+                break
+            } catch {
+                log("engine start failed\(dev.map { " on device \($0)" } ?? ""): \(error)")
+                input.removeTap(onBus: 0)
+                problem = "\(error)"
+            }
+        }
+        guard let eng = started else {
             feed.set(nil)
             r.cancel()
-            return fail("no_input")
+            // A mic that's there but won't open isn't a missing mic.
+            return fail("no_input", problem.map { ["reason": "failed", "message": $0] } ?? [:])
         }
         engine = eng
         engineDevice = device
@@ -1273,6 +1389,76 @@ if args.contains("--test-chord") {
     check("an extra ⇧ or ⌘ still counts with a key held", Voice.isShortcut(extra: true, heldAtArm: [0x00], now: [0x00]))
     exit(bad == 0 ? 0 : 1)
 }
+// --test-spaces checks when a shown panel the window server isn't drawing is built again; exits 1 on a failure.
+if args.contains("--test-spaces") {
+    var bad = 0
+    func check(_ name: String, _ ok: Bool) { print("\(ok ? "ok" : "FAIL") \(name)"); if !ok { bad += 1 } }
+    func step(_ stage: OnScreenStage, _ onScreen: [Bool?], screen: Bool = true) -> (line: String?, next: OnScreenNext) {
+        onScreenStep("pill", stage, onScreen: onScreen, screenAttached: screen)
+    }
+    check("first look, on screen: done", step(.first, [true]) == (nil, .done))
+    check("first look, off screen: a second look before anything else", step(.first, [false]) == (nil, .confirm))
+    check("first look, no answer from the window server: done", step(.first, [nil]) == (nil, .done))
+    check("no display attached (asleep): never built again", step(.first, [false], screen: false) == (nil, .done) && step(.confirm, [false], screen: false) == (nil, .done))
+    check("no panel shown: nothing", step(.first, []) == (nil, .done))
+    check("one panel of two off screen (the drawing layer has one per screen): a second look", step(.first, [true, false]).next == .confirm)
+    // Regression: the pill faded to alpha 1 beside the cursor while the window server said it wasn't on screen.
+    check("off at the second look too: built again, and said", step(.confirm, [false]) == ("pill: not on screen after being shown, building it again", .rebuild))
+    check("on screen at the second look: left alone", step(.confirm, [true]) == (nil, .done))
+    check("no answer at the second look: left alone", step(.confirm, [nil]) == (nil, .done))
+    check("after the rebuild, on screen: said, not built again", step(.rebuilt, [true]) == ("pill: on screen after being built again", .done))
+    check("after the rebuild, still off: said, not built again", step(.rebuilt, [false]) == ("pill: still not on screen after being built again", .done))
+    check("after the rebuild, one on and one unknown: nothing", step(.rebuilt, [true, nil]) == (nil, .done))
+    // The looks themselves, on a made-up clock with made-up window-server answers (no windows): when each look reads, in
+    // ms after the call, and when the panel is built again. shownUntil: hidden from then on; replacedAt: another panel.
+    var clock = 0.0, due: [(at: Double, run: () -> Void)] = []
+    func later(_ d: Double, _ f: @escaping () -> Void) { due.append((clock + d, f)) }
+    func runClock() { while let i = due.indices.min(by: { due[$0].at < due[$1].at }) { let d = due.remove(at: i); clock = d.at; d.run() } }
+    func ms(_ t: [Double]) -> [Int] { t.map { Int(($0 * 1000).rounded()) } }
+    func watch(_ name: String, _ answers: [Bool?], screen: Bool = true, shownUntil: Double = .infinity, replacedAt: Double = .infinity) -> (reads: [Int], rebuilds: [Int]) {
+        clock = 0
+        let a = NSObject(), b = NSObject()
+        var reads: [Double] = [], rebuilds: [Double] = [], left = answers
+        watchOnScreen(name, { clock >= shownUntil ? [] : [(ObjectIdentifier(clock >= replacedAt ? b : a), 1)] },
+                      read: { _ in reads.append(clock); return left.isEmpty ? nil : left.removeFirst() },
+                      screenAttached: { screen }, after: later) { rebuilds.append(clock) }
+        runClock()
+        return (ms(reads), ms(rebuilds))
+    }
+    // Regression: the drawing layer is armed just before the mic starts in the same turn; a turn held past 0.2 s put the
+    // first look ahead of the order-in, and a panel that was fine was built again.
+    check("off at the first look, on 0.1 s later (before the order-in): not built again", watch("race", [false, true]) == ([200, 300], []))
+    check("off at both looks: built again once, at the second, then looked at once more", watch("off", [false, false, true]) == ([200, 300, 500], [300]))
+    check("off, then no answer: not built again", watch("unknown", [false, nil]) == ([200, 300], []))
+    check("still off after the rebuild: never built twice", watch("stuck", [false, false, false]) == ([200, 300, 500], [300]))
+    check("on at the first look: one look only", watch("on", [true]) == ([200], []))
+    check("hidden before the second look: it does nothing", watch("hidden", [false, false], shownUntil: 0.25) == ([200], []))
+    check("replaced before the second look (a display-change rebuild): it does nothing", watch("replaced", [false, false], replacedAt: 0.25) == ([200], []))
+    check("no display attached: one look, nothing built", watch("asleep", [false], screen: false) == ([200], []))
+    clock = 0
+    let shown = NSObject()
+    var earlierReads = 0, earlierRebuilds = 0, newerRebuilds = 0
+    watchOnScreen("again", { [(ObjectIdentifier(shown), 1)] }, read: { _ in earlierReads += 1; return false }, screenAttached: { true }, after: later) { earlierRebuilds += 1 }
+    later(0.25) { watchOnScreen("again", { [(ObjectIdentifier(shown), 1)] }, read: { _ in true }, screenAttached: { true }, after: later) { newerRebuilds += 1 } }
+    runClock()
+    check("a newer show before the second look: the earlier show's look does nothing", earlierReads == 1 && earlierRebuilds == 0 && newerRebuilds == 0)
+    check("window 0 is never a window: no answer", windowOnScreen(0) == nil)
+    check("a negative number: no answer", windowOnScreen(-1) == nil)
+    check("past a window id's range: no answer", windowOnScreen(Int(UInt32.max) + 1) == nil)
+    check("a window number nobody has: no answer", windowOnScreen(0x7fff_fff0) == nil)
+    exit(bad == 0 ? 0 : 1)
+}
+// --test-mics: which mics a take tries when the first won't open; exits 1 on a failure.
+if args.contains("--test-mics") {
+    var bad = 0
+    func check(_ name: String, _ ok: Bool) { print("\(ok ? "ok" : "FAIL") \(name)"); if !ok { bad += 1 } }
+    check("a picked mic is the only one tried", InputDevice.tries(picked: 7, current: 3, builtIn: 4) == [7])
+    check("automatic: the system's choice, then the default by name, then the built-in", InputDevice.tries(picked: nil, current: 3, builtIn: 4) == [nil, 3, 4])
+    check("the default is the built-in: tried once by name", InputDevice.tries(picked: nil, current: 4, builtIn: 4) == [nil, 4])
+    check("no live default: straight to the built-in", InputDevice.tries(picked: nil, current: nil, builtIn: 4) == [nil, 4])
+    check("nothing else to try", InputDevice.tries(picked: nil, current: nil, builtIn: nil) == [nil])
+    exit(bad == 0 ? 0 : 1)
+}
 // --test-clicks: which clicks count as changing the screen, with made-up element roles; exits 1 on a failure.
 if args.contains("--test-clicks") {
     var bad = 0
@@ -1367,6 +1553,8 @@ Thread.detachNewThread {
         // Roamies is answering or speaking: don't listen for the phrase (it mustn't wake itself).
         case "wake_hold": let on = msg["on"] as? Bool == true; DispatchQueue.main.async { voice.wakeHold = on }
         case "mute": if let on = msg["on"] as? Bool { DispatchQueue.main.async { OutputMute.enabled = on; if !on { OutputMute.end() } } }
+        // The speech language for takes: a locale id such as "ar-SA", or "auto" / "" for the Mac's own languages.
+        case "lang": let id = msg["id"] as? String ?? ""; DispatchQueue.main.async { voice.setSpeechLang(id) }
         // The panel's mic picker: the list, and a pick (a UID from it; none or "" is automatic).
         case "mics": DispatchQueue.main.async { emit(InputDevice.list()) }
         case "mic":

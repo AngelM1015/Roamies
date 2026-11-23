@@ -24,7 +24,7 @@ export const GEMINI_PITCH = 1.06;
 export const GEMINI_PACE = 'speaking quickly';
 export const GEMINI_DEFAULT_VOICE = 'Kore';
 // Each look's own Gemini voice until the user picks another for it (as each has its own Fish Audio voice).
-export const GEMINI_LOOK_VOICES = { classic: 'Puck', jarvis: 'Charon', anime: 'Leda', sarah: 'Sulafat', adrian: 'Achird', rita: 'Despina' };
+export const GEMINI_LOOK_VOICES = { classic: 'Puck', jarvis: 'Charon', glayos: 'Erinome', ultren: 'Algenib', anime: 'Leda', sarah: 'Sulafat', adrian: 'Achird', rita: 'Despina' };
 // The prebuilt voices and how Google describes each (AI Studio speech generation docs, Nov 2026).
 export const GEMINI_VOICES = [
   ['Zephyr', 'Bright'], ['Puck', 'Upbeat'], ['Charon', 'Informative'], ['Kore', 'Firm'], ['Fenrir', 'Excitable'], ['Leda', 'Youthful'],
@@ -101,7 +101,7 @@ export class GeminiVoice {
   say(text) {
     if (this.state !== 'open') return;
     const p = plain(text);
-    if (!/[\p{L}\p{N}]/u.test(p.text.replace(/<[^>]*>/g, ''))) return; // nothing to say ("…", a lone cue or tag): asking would get no audio and fail the reply
+    if (!p.text.split(/<[^>]*>/).some((s) => /[\p{L}\p{N}]/u.test(s))) return; // nothing to say ("…", a lone cue or tag): asking would get no audio and fail the reply
     this.jobs.push({ ...p, chunks: [], state: 'waiting', odd: null, timer: null });
     this.pump();
   }

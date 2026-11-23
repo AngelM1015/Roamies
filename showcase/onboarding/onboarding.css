@@ -8,6 +8,23 @@
   font-display: block;
 }
 @font-face {
+  font-family: "Roamies Arabic";
+  src: url("fonts/readex-pro-arabic.woff2") format("woff2");
+  font-weight: 160 700;
+  font-display: swap;
+  /* Arabic letters only: the Latin side of every stack stays Martian Mono, spaces and all. */
+  unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF, U+200C-200F, U+2010-2011, U+204F;
+}
+@font-face {
+  font-family: "Roamies Arabic RTL";
+  src: url("fonts/readex-pro-arabic.woff2") format("woff2");
+  font-weight: 160 700;
+  font-display: swap;
+  /* The same file, also taking the space and common punctuation: first in the stack of right-to-left text only, so
+     Arabic words and their ! . , ? sit a normal distance apart instead of a full monospace cell. */
+  unicode-range: U+0020-0021, U+0028-0029, U+002C-002E, U+003A-003B, U+003F, U+00A0, U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF, U+200C-200F, U+2010-2011, U+204F;
+}
+@font-face {
   font-family: "Martian Mono";
   src: url("fonts/martian-mono.woff2") format("woff2");
   font-weight: 100 800;
@@ -31,7 +48,7 @@
   --danger: #ffb4a8;
   --ease: cubic-bezier(.2, .8, .2, 1);
   --display: "Doto", ui-monospace, monospace;
-  --mono: "Martian Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --mono: "Martian Mono", "Roamies Arabic", ui-monospace, "SF Mono", Menlo, monospace;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -257,6 +274,8 @@ select {
 select option { background: #061719; color: var(--ink); }
 select:focus-visible { outline: none; }
 .note { margin: 8px 0 0; font-size: 11px; line-height: 1.4; color: var(--ink-3); }
+/* A list after a note keeps the gap a list has after the lead line. */
+.note + .rows { margin-top: 18px; }
 .field-row { display: flex; gap: 8px; }
 .field { display: flex; flex: 1; min-width: 0; --bc: var(--line-hi); --fill: #061719; }
 /* A field takes focus from a click as well as the keyboard, so it lights up in the accent instead of the thick white

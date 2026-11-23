@@ -10,6 +10,10 @@
 
 export const STUDIO_DEFAULT_URL = 'http://127.0.0.1:3900';
 export const STUDIO_RATE = 24000;
+// Silence allowed while a sentence renders. The first sentence of a socket may be a cold start (the app reaps its
+// engine when idle, and loading it takes 10-45 s), so it gets longer.
+export const SENTENCE_TIMEOUT = 90_000;
+export const FIRST_SENTENCE_TIMEOUT = 150_000;
 
 /** VoiceStudio's base URL; anything that isn't a loopback http URL falls back to the default. */
 export function studioUrl(env = process.env) {
@@ -86,8 +90,10 @@ const fail = (reason, detail, heard) => {
  * err.reason ('offline' | 'starting' | 'voice' | 'timeout' | 'closed' | 'error') and err.heard.
  */
 export class StudioVoice {
-  constructor({ voice = null, base = studioUrl(), WebSocketImpl = globalThis.WebSocket, onAudio, onEnd, onError, openTimeout = 5000, sentenceTimeout = 90_000 }) {
-    Object.assign(this, { voice, base, WebSocketImpl, onAudio, onEnd, onError, openTimeout, sentenceTimeout });
+  constructor({ voice = null, base = studioUrl(), WebSocketImpl = globalThis.WebSocket, onAudio, onEnd, onError, openTimeout = 5000, sentenceTimeout = SENTENCE_TIMEOUT, firstSentenceTimeout = FIRST_SENTENCE_TIMEOUT }) {
+    Object.assign(this, { voice, base, WebSocketImpl, onAudio, onEnd, onError, openTimeout, sentenceTimeout, firstSentenceTimeout });
+    this.sent = 0; // sentences sent on this socket: the first one gets firstSentenceTimeout
+    this.limit = firstSentenceTimeout; // the silence allowed for the sentence in flight
     this.queue = [];
     this.state = 'new'; // new → opening → open → (ending) → done
     this.ending = false;
@@ -119,7 +125,7 @@ export class StudioVoice {
         return;
       }
       const pcm = this.whole(e.data);
-      if (pcm.length) { this.heard = true; this.arm(this.sentenceTimeout, 'timeout'); this.onAudio?.(pcm, this.rate); }
+      if (pcm.length) { this.heard = true; this.arm(this.limit, 'timeout'); this.onAudio?.(pcm, this.rate); }
     };
     ws.onerror = () => this.fail(this.state === 'opening' ? 'offline' : 'closed');
     // 1008 while starting up: VoiceStudio refuses sockets until it's ready.
@@ -150,8 +156,9 @@ export class StudioVoice {
     const text = this.queue.shift();
     if (text == null) { if (this.ending) this.finish(); return; }
     this.busy = true;
+    this.limit = this.sent++ ? this.sentenceTimeout : this.firstSentenceTimeout;
     this.ws.send(JSON.stringify({ text, ...(this.voice ? { voice: this.voice } : {}) }));
-    this.arm(this.sentenceTimeout, 'timeout');
+    this.arm(this.limit, 'timeout');
   }
 
   // PCM samples are 2 bytes; a chunk can end mid-sample, so carry the odd byte into the next one.

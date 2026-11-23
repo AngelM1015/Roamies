@@ -1,7 +1,7 @@
 // What the setup guide offers to connect. Run: npm test
 import assert from 'node:assert/strict';
 import { AUTH_PROVIDERS, apiKeyStorageKeys, getAuthStorageKeys, getModelsForProvider, storageKeyProvider } from '@kenkaiiii/gg-core';
-import { KEY_LINKS, keyCards, keyKinds, seesImages, signInCards } from '../providers.mjs';
+import { KEY_LINKS, fallbackModel, keyCards, keyKinds, seesImages, signInCards } from '../providers.mjs';
 import { SAFE, checkLink } from '../safety.mjs';
 
 const cards = signInCards(['anthropic', 'openai'], (id) => id === 'openai');
@@ -67,4 +67,26 @@ assert.equal(seesImages('glm', 'no-such-model'), false);
 for (const p of AUTH_PROVIDERS.map((x) => x.value)) {
   const models = getModelsForProvider(p);
   if (models.length) assert.ok(models.some((m) => seesImages(p, m.id)), `${p}: has a model that can see images`);
+}
+
+// Regression (#94): signing out and in again (or an update) dropped the picked Sonnet for the fast Haiku.
+{
+  const runs = ['claude-haiku-5-5', 'claude-sonnet-5-5'];
+  const can = (id) => runs.includes(id), runnable = runs.map((id) => ({ id }));
+  assert.equal(fallbackModel(['claude-sonnet-5-5', 'claude-haiku-5-5'], can, runnable), 'claude-sonnet-5-5', 'the last pick wins');
+  assert.equal(fallbackModel([undefined, 'claude-haiku-5-5'], can, runnable), 'claude-haiku-5-5', 'nothing picked yet: the fast one');
+  assert.equal(fallbackModel(['gone', 'also-gone'], can, runnable), 'claude-haiku-5-5', 'none can run: the first runnable');
+}
+
+// Regression (#121, #123): on a fresh install ~/.gg didn't exist, so saving a key failed on auth.json.lock (E30).
+{
+  const { openAuth } = await import('../providers.mjs');
+  const fs = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'roamies-auth-'));
+  const auth = openAuth(path.join(dir, 'missing', '.gg', 'auth.json'));
+  await auth.setCredentials('openrouter', { accessToken: 'k', refreshToken: '', expiresAt: Date.now() + 864e5 });
+  assert.ok(await auth.hasProviderAuth('openrouter'), 'the key saved into a folder that did not exist');
+  await fs.rm(dir, { recursive: true, force: true });
 }

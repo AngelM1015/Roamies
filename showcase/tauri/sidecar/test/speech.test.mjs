@@ -39,6 +39,17 @@ assert.equal(speakable('Hi [landlord name], thanks'), 'Hi landlord name, thanks'
 assert.equal(speakable('Hi [Landlord]'), 'Hi Landlord', 'not a cue: brackets go');
 assert.equal(speakable('✅ 🎬'), '');
 assert.equal(speakable('*waves* hello'), 'waves hello');
+// Maths symbols are said as words (#120); the text on screen keeps them.
+assert.equal(speakable('3² is 9.'), '3 squared is 9.');
+assert.equal(speakable('A cube of side 2 has volume 2³.'), 'A cube of side 2 has volume 2 cubed.');
+assert.equal(speakable('That is 10⁶, and 10⁻³ is small.'), 'That is 10 to the power of 6, and 10 to the power of minus 3 is small.');
+assert.equal(speakable('x^2 + y^10'), 'x squared + y to the power of 10');
+assert.equal(speakable('12 ÷ 4 = 3'), '12 divided by 4 = 3');
+assert.equal(speakable('6 × 7 is 42, and 6*7 too.'), '6 times 7 is 42, and 6 times 7 too.');
+assert.equal(speakable('√16 is 4.'), 'the square root of 16 is 4.');
+assert.equal(speakable('It is 25°C, about 77 °F.'), 'It is 25 degrees Celsius, about 77 degrees Fahrenheit.');
+assert.equal(speakable('π ≈ 3.14'), 'pi is about 3.14');
+assert.equal(speakable('5 − 2 ± 1'), '5 minus 2 plus or minus 1');
 // Blank lines between the spoken answer and the points (the usual card shape), streamed or all at once.
 const card = "Paris looks gray, around 11 degrees. Bring an umbrella.\n\n- Calm, overcast weather.\n- No storm alerts.\n\nSources: [Sortir](https://x.y/a)";
 assert.deepEqual(said([card]), ['Paris looks gray, around 11 degrees.', 'Bring an umbrella.']);
@@ -137,3 +148,74 @@ assert.equal(listensAfter('Want me to open it?', false), true);
 assert.deepEqual(LISTEN_SECS, [3, 5, 8, 10, 15]);
 for (const s of LISTEN_SECS) assert.equal(listenWait(s), s);
 for (const s of [undefined, 0, 2, 7, 60, '5']) assert.equal(listenWait(s), 8);
+
+// VoiceStudio (early): the first chunk is cut at the first clause break 30+ characters in, or at a word past 60 with no
+// sentence ended; later chunks use the normal sentence rules. The default path doesn't cut at commas.
+const early = (chunks, opts = { early: true }) => {
+  const out = [];
+  const s = new SpeechText((t) => out.push(t), opts);
+  chunks.forEach((c) => s.push(c));
+  s.flush();
+  return out;
+};
+assert.deepEqual(early(['Sure, I can check the weather in Paris for you today, one moment. Then I will tell you. Bye.']), ['Sure, I can check the weather in Paris for you today,', 'one moment.', 'Then I will tell you.', 'Bye.']);
+assert.deepEqual(said(['Sure, I can check the weather in Paris for you today, one moment.']), ['Sure, I can check the weather in Paris for you today, one moment.'], 'default: no early cut');
+{ // Nothing is said before the clause break is in (streamed), and a spaced dash is cut without being said.
+  const out = [], s = new SpeechText((t) => out.push(t), { early: true });
+  s.push('Sure, I can check the weather in Paris');
+  assert.deepEqual(out, [], 'waits for the break');
+  s.push(' for you today, one moment.');
+  assert.deepEqual(out, ['Sure, I can check the weather in Paris for you today,']);
+  assert.deepEqual(early(['Paris is lovely this spring of the year - it is mild and sunny most days here.']), ['Paris is lovely this spring of the year', 'it is mild and sunny most days here.']);
+}
+// No break 30+ in, and a sentence already ended: the normal rules say the first sentence.
+assert.deepEqual(early(['Hi there. Let me check the weather in Paris for you now.']), ['Hi there.', 'Let me check the weather in Paris for you now.']);
+// No break and no sentence end, past 60 characters: cut at a word (the rest follows).
+{
+  const text = 'word '.repeat(20).trim();
+  const got = early([text]);
+  assert.equal(got.length, 2); assert.equal(got[0].length, 59, 'cut at the last word before 60');
+  assert.equal(got.join(' '), text);
+}
+// A finished reply's last sentence is complete at the flush: said whole. Past 60 characters with no end, it's cut at a word.
+{
+  assert.deepEqual(early(['Here is the answer for you today.']), ['Here is the answer for you today.']);
+  assert.deepEqual(early(['Yes, sure.']), ['Yes, sure.']);
+  const long = 'It is a long sentence that goes on and on without any clause break at all.';
+  assert.equal(early([long]).join(' '), long);
+}
+// Cap: once the spoken characters reach the cap, nothing more is said (whole chunks only); flush after it is a no-op.
+{
+  const out = [];
+  const s = new SpeechText((t) => out.push(t), { cap: 25 });
+  s.push('First sentence here. Second one. Third one is here too. Fourth.'); s.flush();
+  assert.deepEqual(out, ['First sentence here.', 'Second one.'], 'the chunk that reaches the cap is whole; the rest is not said');
+  s.push('More text. '); s.flush();
+  assert.deepEqual(out, ['First sentence here.', 'Second one.'], 'no more after the cap, even at flush');
+}
+{ // Early and cap together: the first chunk is short, and the cap still applies after it.
+  const out = [];
+  const s = new SpeechText((t) => out.push(t), { early: true, cap: 60 });
+  s.push('Sure, I can check the weather in Paris for you today, one moment. Then I will tell you more about it. Bye.'); s.flush();
+  assert.deepEqual(out, ['Sure, I can check the weather in Paris for you today,', 'one moment.'], 'capped after 60 characters');
+}
+console.log('speech early and cap tests: passed');
+
+{ // The face follows the voice: every mood, tone and sound has a feeling (but the plain ones), and the feelings read.
+  const { cueFeel, FEELS } = await import('../speech.mjs');
+  const plain = new Set(['narrator', 'emphasis', 'clear throat']);
+  for (const c of [...VOICE_CUES.emotions, ...VOICE_CUES.tones, ...VOICE_CUES.sounds]) if (!plain.has(c)) assert.ok(cueFeel(`[${c}] Hi.`), `${c} has a feeling`);
+  const all = Object.values(FEELS).flat();
+  assert.equal(new Set(all).size, all.length, 'each cue in one feeling');
+  assert.equal(cueFeel('[slightly sad] Oh no.'), 'sad');
+  assert.equal(cueFeel('[warm and curious] Tell me.'), 'warm');
+  assert.equal(cueFeel('[quietly, a little embarrassed] Oops.'), 'sad');
+  assert.equal(cueFeel('[laughing] Ha ha, fair.'), 'laugh');
+  assert.equal(cueFeel('It is [emphasis] today, [excited] wow.'), 'joy', 'the first cue with a feeling');
+  assert.equal(cueFeel('No cue here.'), null);
+  assert.equal(cueFeel('[narrator] Once.'), null);
+  const agent = (await import('node:fs')).readFileSync(new URL('../../../roamies/agent.js', import.meta.url), 'utf8');
+  const drawn = agent.slice(agent.indexOf('const FEEL = {'), agent.indexOf('};', agent.indexOf('const FEEL = {')));
+  for (const f of Object.keys(FEELS)) assert.match(drawn, new RegExp(`\\n\\s+${f}: \\{`), `the face draws ${f}`);
+  console.log('cue feeling tests: passed');
+}

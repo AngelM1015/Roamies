@@ -338,6 +338,9 @@ export function closeSpare() {
   clearTimeout(s.timer);
   s.warm.then((w) => w?.close()).catch(() => {});
 }
+// Claude Code cuts each tool's description at 4,096 characters unless told otherwise, and draw's is about twice that:
+// Claude never saw maps, tables, maths or deep explanations. Ours fit in this.
+export const MAX_TOOL_DESCRIPTION = 16_384;
 // Everything a query is started with; `link` carries what's only known once a request takes it.
 function sdkOptions(o, resume, link) {
   const bridge = createToolBridge({ tools: o.tools ?? [], signal: () => link.signal, onEvent: (event) => link.onEvent?.(event) });
@@ -355,7 +358,7 @@ function sdkOptions(o, resume, link) {
     canUseTool: async (name, toolInput) => (name.startsWith(TOOL_PREFIX) ? { behavior: 'allow', updatedInput: toolInput } : { behavior: 'deny', message: `${name} is not available in Roamies.` }),
     includePartialMessages: true,
     pathToClaudeCodeExecutable: o.executable,
-    env: o.env,
+    env: { ...(o.env ?? process.env), CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH: String(MAX_TOOL_DESCRIPTION) },
     abortController,
     stderr: (d) => link.stderr?.(d),
     ...(resume ? { resume } : {}),
@@ -525,4 +528,29 @@ export class ClaudeCodeAgent {
       if (o.keepWarm) warmSpare(o, resumeId(this.resume, [...this.messages, { role: 'user', content: '' }]));
     }
   }
+}
+
+export const CLAUDE_CODE_UPDATING = 'Claude Code is updating. Ask me again in a minute.';
+// An app update can move gg-core's pinned Claude Code version, leaving a signed-in user without the binary (#101):
+// fetch the pinned one in the background instead of asking them to sign in again. resolve/ensure: gg-core's.
+export function claudeCodeInstaller({ resolve, ensure, log = () => {} }) {
+  let running = null, failed = null;
+  const start = () => {
+    if (running || resolve()) return running;
+    failed = null;
+    running = ensure().then(() => log({ ok: true }), (e) => { failed = e; log({ ok: false, error: String(e?.message ?? e) }); })
+      .finally(() => { running = null; });
+    return running;
+  };
+  return {
+    start,
+    // The binary, else an error to show: it's being fetched, or why the last try failed (asking again retries).
+    binary() {
+      const bin = resolve();
+      if (bin) return bin;
+      const last = running ? null : failed;
+      start();
+      throw new Error(last ? `Claude Code didn't update: ${last?.message ?? last}` : CLAUDE_CODE_UPDATING);
+    },
+  };
 }

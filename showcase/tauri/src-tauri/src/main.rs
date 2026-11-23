@@ -33,6 +33,18 @@ use voice::{init_hotkeys, set_esc, set_hotkey, start_voice, stop_voice, to_voice
 static GENERATION: AtomicUsize = AtomicUsize::new(0);
 /// The overlay window the sidekick lives in. It moves to whichever screen the cursor is on.
 static SIDEKICK_OVERLAY: Mutex<Option<String>> = Mutex::new(None);
+
+/// Wayland: the GTK layer-shell overlay host's stdin (its stdout is read on a thread).
+#[cfg(target_os = "linux")]
+static LINUX_OVERLAY: Mutex<Option<ChildStdin>> = Mutex::new(None);
+/// The host process itself, so Quit can stop it and the screen watch can reap it.
+#[cfg(target_os = "linux")]
+static HOST_CHILD: Mutex<Option<Child>> = Mutex::new(None);
+/// How many times the host has been started in this run. After a few failures, fall back to the Tauri overlay.
+#[cfg(target_os = "linux")]
+static HOST_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(target_os = "linux")]
+static HOST_DISABLED: AtomicBool = AtomicBool::new(false);
 /// The setup guide is open: voice events go to it (for the "try it" test) instead of the agent.
 static ONBOARDING: AtomicBool = AtomicBool::new(false);
 const ONBOARDING_LABEL: &str = "onboarding";
@@ -104,6 +116,18 @@ fn to_overlays(app: &AppHandle, msg: &Value) {
     }
     if shows_answer(msg) {
         to_voice(app, &json!({ "cmd": "handoff" }));
+    }
+    // Wayland: the overlay is a separate GTK layer-shell host, bridged over stdin/stdout.
+    #[cfg(target_os = "linux")]
+    {
+        let mut host = LINUX_OVERLAY.lock().unwrap();
+        if let Some(stdin) = host.as_mut() {
+            let line = json!({ "type": "host", "msg": msg });
+            if writeln!(stdin, "{line}").is_ok() && stdin.flush().is_ok() {
+                return;
+            }
+            *host = None; // the host is gone: fall through to the Tauri overlays
+        }
     }
     let js = format!("window.__roamieHost&&__roamieHost({msg})");
     for (label, w) in app.webview_windows() {
@@ -372,11 +396,66 @@ fn set_typing(app: AppHandle, window: WebviewWindow, on: bool) {
 /// Runs the voice helper in a one-shot permission mode and returns what it printed.
 fn helper_perms(args: &[&str]) -> Value {
     let Some(bin) = voice_binary() else { return json!({ "type": "perms", "unsupported": true }) };
-    let out = hide_console(&mut Command::new(bin)).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output();
-    out.ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|t| t.lines().rev().find_map(|l| serde_json::from_str::<Value>(l).ok()))
-        .unwrap_or_else(|| json!({ "type": "perms", "error": true }))
+    let out = match hide_console(&mut Command::new(bin)).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output() {
+        Ok(o) => o,
+        Err(e) => return json!({ "type": "perms", "error": true, "spawn": e.to_string() }),
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .rev()
+        .find_map(|l| serde_json::from_str::<Value>(l).ok())
+        // Said nothing: how it ended tells a missing DLL from a CPU it can't run on (#95, #128).
+        .unwrap_or_else(|| json!({ "type": "perms", "error": true, "exit": exit_info(out.status) }))
+}
+
+/// How a helper process ended, for diagnostics.
+pub(crate) fn exit_info(status: std::process::ExitStatus) -> Value {
+    #[cfg(unix)]
+    let signal = std::os::unix::process::ExitStatusExt::signal(&status);
+    #[cfg(not(unix))]
+    let signal: Option<i32> = None;
+    exit_json(status.code(), signal)
+}
+
+fn exit_json(code: Option<i32>, signal: Option<i32>) -> Value {
+    let mut v = json!({ "code": code, "signal": signal });
+    if let Some(c) = code.filter(|c| *c < 0) {
+        // Windows crash codes are NTSTATUS values; their hex form is what people search for.
+        v["hex"] = json!(format!("{:#010X}", c as u32));
+    }
+    let meaning = match code.map(|c| c as u32) {
+        Some(0xC000_001D) => Some("illegal instruction: the CPU lacks an instruction the helper uses"),
+        Some(0xC000_0135) => Some("a DLL it needs is missing"),
+        Some(0xC000_007B) => Some("a DLL it loaded is the wrong build"),
+        Some(0xC000_0139) => Some("a DLL it loaded is missing a function (often an old Visual C++ runtime)"),
+        Some(0xC000_0005) => Some("access violation (crashed)"),
+        Some(0xC000_0409) => Some("stack buffer overrun or fast-fail (crashed)"),
+        _ => None,
+    };
+    if let Some(m) = meaning {
+        v["meaning"] = json!(m);
+    }
+    v
+}
+
+#[cfg(test)]
+mod exit_tests {
+    use super::*;
+
+    #[test]
+    fn windows_crash_codes_are_named() {
+        let v = exit_json(Some(0xC000_001Du32 as i32), None);
+        assert_eq!(v["code"], json!(-1073741795));
+        assert_eq!(v["hex"], json!("0xC000001D"));
+        assert!(v["meaning"].as_str().unwrap().starts_with("illegal instruction"));
+        assert_eq!(exit_json(Some(0xC000_0135u32 as i32), None)["meaning"], json!("a DLL it needs is missing"));
+    }
+
+    #[test]
+    fn plain_exits_and_signals_stay_plain() {
+        assert_eq!(exit_json(Some(1), None), json!({ "code": 1, "signal": null }));
+        assert_eq!(exit_json(None, Some(4)), json!({ "code": null, "signal": 4 }));
+    }
 }
 
 /// What the shell knows for a diagnostics report (the sidecar writes it): screens, the tray icon, the panel, the
@@ -418,6 +497,7 @@ fn diagnostics(app: &AppHandle) -> Value {
         "voice_helper": voice_binary().map(|p| p.exists()),
         "hands_helper": helper_binary("roamies-hands").map(|p| p.exists()),
         "voice_running": app.state::<Voice>().0.lock().map(|v| v.is_some()).unwrap_or(false),
+        "voice_exit": voice::last_voice_exit(),
         "permissions": perms,
         "microphones": mics,
     })
@@ -1029,6 +1109,11 @@ fn follow_cursor(app: &AppHandle) {
 fn move_sidekick_to(app: &AppHandle, x: f64, y: f64) {
     let Some(label) = SIDEKICK_OVERLAY.lock().unwrap().clone() else { return };
     let Some(w) = app.get_webview_window(&label) else { return };
+    // The Wayland host owns its own surface; a Tauri overlay only exists after a fallback.
+    #[cfg(target_os = "linux")]
+    if LINUX_OVERLAY.lock().unwrap().is_some() {
+        return;
+    }
     let Ok(Some(mon)) = app.monitor_from_point(x, y) else { return };
     if let Ok(Some(now)) = w.current_monitor() {
         if now.position() == mon.position() && now.size() == mon.size() {
@@ -1047,13 +1132,178 @@ fn move_sidekick_to(app: &AppHandle, x: f64, y: f64) {
     {
         let _ = w.set_position(*mon.position());
         // A pixel short, as when it was made (build_overlays).
-        let _ = w.set_size(tauri::PhysicalSize::new(mon.size().width, mon.size().height.saturating_sub(1)));
+        let size = tauri::PhysicalSize::new(mon.size().width, mon.size().height.saturating_sub(1));
+        #[cfg(target_os = "linux")]
+        fix_overlay_size(&w, size);
+        let _ = w.set_size(size);
     }
     let _ = w.eval(safe_js(&mon));
     let _ = w.eval("window.__roamieMoved&&__roamieMoved()");
 }
 
+/// Linux: the overlay's minimum and maximum size are its size. tao makes a window non-resizable only once it's up,
+/// and Mutter (GNOME) auto-maximizes a resizable window covering most of the screen as it maps; a maximized window
+/// above a fullscreen app keeps GNOME's top bar and dock up (#78). Size limits are in place before it maps.
+#[cfg(target_os = "linux")]
+fn fix_overlay_size(w: &WebviewWindow, size: tauri::PhysicalSize<u32>) {
+    let _ = w.set_max_size(None::<tauri::Size>);
+    let _ = w.set_min_size(Some(size));
+    let _ = w.set_max_size(Some(size));
+}
+
+/// Wayland: whether the GTK host can run here. It asks the host itself, because layer-shell support depends on
+/// the compositor (GNOME and some others have none), not on the session type alone.
+#[cfg(target_os = "linux")]
+fn overlay_host_supported(host: &std::path::Path) -> bool {
+    use std::sync::mpsc;
+    let (tx, rx) = mpsc::channel();
+    let host = host.to_path_buf();
+    std::thread::spawn(move || {
+        let ok = Command::new(&host)
+            .arg("--supported")
+            .env("GDK_BACKEND", "wayland")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        let _ = tx.send(ok);
+    });
+    // A host that hangs must not hang the app at launch.
+    rx.recv_timeout(Duration::from_secs(2)).unwrap_or(false)
+}
+
+/// Wayland: run the GTK layer-shell overlay host and bridge it to the sidecar. Returns whether it is running;
+/// false means build_overlays should build the ordinary Tauri overlays instead.
+#[cfg(target_os = "linux")]
+fn spawn_overlay_host(app: &AppHandle) -> tauri::Result<bool> {
+    if LINUX_OVERLAY.lock().unwrap().is_some() {
+        return Ok(true);
+    }
+    if HOST_DISABLED.load(Ordering::SeqCst) {
+        return Ok(false);
+    }
+    // A host that crashes at startup must not respawn forever: after a few tries, keep the Tauri overlay.
+    let attempt = HOST_ATTEMPTS.fetch_add(1, Ordering::SeqCst) + 1;
+    if attempt > 3 {
+        eprintln!("overlay: the host failed {attempt} times, using the ordinary overlay");
+        HOST_DISABLED.store(true, Ordering::SeqCst);
+        return Ok(false);
+    }
+    let exe = std::env::current_exe()?;
+    let dir = exe.parent().map(PathBuf::from).unwrap_or_default();
+    let host = dir.join("roamies-overlay");
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(v) = std::env::var_os("ROAMIES_DIST") {
+        candidates.push(PathBuf::from(v));
+    }
+    candidates.push(dir.join("../../../dist"));
+    candidates.push(dir.join("dist"));
+    if let Ok(resource) = app.path().resource_dir() {
+        candidates.push(resource.join("dist"));
+    }
+    let Some(dist) = candidates.into_iter().find(|p| p.is_dir()) else {
+        eprintln!("overlay: no dist directory found, using the ordinary overlay");
+        HOST_DISABLED.store(true, Ordering::SeqCst);
+        return Ok(false);
+    };
+    if !host.is_file() {
+        eprintln!("overlay: host binary not found at {}, using the ordinary overlay", host.display());
+        HOST_DISABLED.store(true, Ordering::SeqCst);
+        return Ok(false);
+    }
+    if !overlay_host_supported(&host) {
+        eprintln!("overlay: this compositor has no layer-shell support, using the ordinary overlay");
+        HOST_DISABLED.store(true, Ordering::SeqCst);
+        return Ok(false);
+    }
+    eprintln!("overlay: dist {}", dist.display());
+    // A previous host may have exited without being reaped yet; drop it before starting another.
+    if let Some(mut old) = HOST_CHILD.lock().unwrap().take() {
+        let _ = old.kill();
+        let _ = old.wait();
+    }
+    let mut child = match Command::new(&host)
+        .arg("--dist")
+        .arg(&dist)
+        .env("GDK_BACKEND", "wayland")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(e) => {
+            eprintln!("overlay: couldn't start the host: {e}, using the ordinary overlay");
+            HOST_DISABLED.store(true, Ordering::SeqCst);
+            return Ok(false);
+        }
+    };
+    *LINUX_OVERLAY.lock().unwrap() = child.stdin.take();
+    let out = child.stdout.take();
+    *HOST_CHILD.lock().unwrap() = Some(child);
+    if let Some(out) = out {
+        let app2 = app.clone();
+        std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader};
+            for line in BufReader::new(out).lines().map_while(Result::ok) {
+                match serde_json::from_str::<serde_json::Value>(&line) {
+                    Ok(v) if v.get("type").and_then(|t| t.as_str()) == Some("sidecar_send") => {
+                        if let Some(msg) = v.get("msg") {
+                            to_sidecar(&app2, msg);
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(_) => eprintln!("[overlay] {line}"),
+                }
+            }
+            *LINUX_OVERLAY.lock().unwrap() = None;
+            if !sidecar::QUITTING.load(Ordering::SeqCst) {
+                eprintln!("overlay: host exited");
+            }
+        });
+    }
+    Ok(true)
+}
+
+/// Stop the host on Quit or Exit, so it cannot outlive the app and leave a ghost overlay.
+#[cfg(target_os = "linux")]
+fn stop_overlay_host() {
+    if let Some(mut stdin) = LINUX_OVERLAY.lock().unwrap().take() {
+        let _ = writeln!(stdin, "{{\"type\":\"quit\"}}");
+        let _ = stdin.flush();
+    }
+    if let Some(mut child) = HOST_CHILD.lock().unwrap().take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+/// Reap a host that exited on its own, so a crash leaves no zombie behind.
+#[cfg(target_os = "linux")]
+fn reap_overlay_host() {
+    let exited = {
+        let mut child = HOST_CHILD.lock().unwrap();
+        match child.as_mut() {
+            Some(c) => matches!(c.try_wait(), Ok(Some(_))),
+            None => false,
+        }
+    };
+    if exited {
+        *HOST_CHILD.lock().unwrap() = None;
+        *LINUX_OVERLAY.lock().unwrap() = None;
+    }
+}
+
 fn build_overlays(app: &AppHandle) -> tauri::Result<()> {
+    // Wayland: a Tauri toplevel cannot be click-through on Hyprland (input regions on toplevels are ignored by
+    // design), so try the GTK layer-shell host first. It says no on compositors without layer-shell, and after
+    // repeated crashes, so the ordinary Tauri overlay remains the fallback.
+    #[cfg(target_os = "linux")]
+    if linux::wayland() && !HOST_DISABLED.load(Ordering::SeqCst) && spawn_overlay_host(app)? {
+        return Ok(());
+    }
     for (label, w) in app.webview_windows() {
         if is_overlay(&label) {
             w.destroy()?;
@@ -1089,7 +1339,7 @@ fn build_overlays(app: &AppHandle) -> tauri::Result<()> {
         let unmanaged = linux::unmanaged_overlay();
         #[cfg(not(target_os = "linux"))]
         let unmanaged = false;
-        let w = WebviewWindowBuilder::new(app, label, WebviewUrl::App("desktop.html".into()))
+        let b = WebviewWindowBuilder::new(app, label, WebviewUrl::App("desktop.html".into()))
             .title("Roamies")
             .visible(!unmanaged)
             .transparent(true)
@@ -1106,12 +1356,18 @@ fn build_overlays(app: &AppHandle) -> tauri::Result<()> {
             .focusable(false)
             .position(pos.x, pos.y)
             .inner_size(size.width, size.height)
-            .initialization_script(init)
-            .build()?;
+            .initialization_script(init);
+        // Linux: a fixed size from the start, so it's never resizable as it maps (fix_overlay_size, #78).
+        #[cfg(target_os = "linux")]
+        let b = b.min_inner_size(size.width, size.height).max_inner_size(size.width, size.height);
+        let w = b.build()?;
         w.set_ignore_cursor_events(true)?;
         #[cfg(target_os = "linux")]
-        if unmanaged {
-            linux::set_unmanaged(&w, true, false);
+        {
+            linux::keep_unmaximized(&w);
+            if unmanaged {
+                linux::set_unmanaged(&w, true, false);
+            }
         }
         #[cfg(target_os = "macos")]
         full_frame_rate(&w);
@@ -1384,6 +1640,15 @@ fn watch_screens(app: AppHandle) {
         let app2 = app.clone();
         // Monitor queries belong on the main thread (see pump_cursor), and so does making windows.
         let _ = app.run_on_main_thread(move || {
+            // Wayland: while the GTK host owns the overlay, it follows the output by itself. Reap it first, so a
+            // crash falls through to the Tauri overlay instead of leaving no overlay at all.
+            #[cfg(target_os = "linux")]
+            {
+                reap_overlay_host();
+                if LINUX_OVERLAY.lock().unwrap().is_some() {
+                    return;
+                }
+            }
             // Notches only change with the screens, so this 3 s pass keeps the cache that safe_js reads.
             #[cfg(target_os = "macos")]
             if refresh_screen_notches() {
@@ -1564,13 +1829,26 @@ fn helper_binary(name: &str) -> Option<PathBuf> {
 fn log_stdio(name: &str) -> Stdio {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(|h| PathBuf::from(h).join(".gg").join(name))
+        .and_then(|h| log_path(std::path::Path::new(&h), name))
         .and_then(|p| {
             rotate_log(&p);
             OpenOptions::new().create(true).append(true).open(p).ok()
         })
         .map(Stdio::from)
         .unwrap_or_else(Stdio::null)
+}
+
+/// Where the app's own logs go: ~/Roamies/Data/logs. Until the sidecar has moved old data out of ~/.gg (datadir.mjs),
+/// they stay in ~/.gg, so creating the new folder here never makes that move think it's already done.
+fn log_path(home: &std::path::Path, name: &str) -> Option<PathBuf> {
+    let data = home.join("Roamies").join("Data");
+    let old = home.join(".gg");
+    if !data.exists() && (old.join("sidekick").exists() || old.join("sidekick.json").exists()) {
+        return Some(old.join(name));
+    }
+    let logs = data.join("logs");
+    std::fs::create_dir_all(&logs).ok()?;
+    Some(logs.join(name))
 }
 
 // Each helper log stays under ~2 MB: past 1 MB it becomes <name>.old (replacing the last one) and starts again.
@@ -1790,6 +2068,9 @@ fn handle_sidecar(app: &AppHandle, msg: Value) {
                 to_voice(app, &json!({ "cmd": "wake", "on": wake }));
                 let name = msg.get("wakeName").and_then(Value::as_str).unwrap_or("");
                 to_voice(app, &json!({ "cmd": "wake_name", "word": name }));
+                // The language takes are recognised in ("auto": the Mac's own language list). macOS helper only.
+                let lang = msg.get("lang").and_then(Value::as_str).unwrap_or("auto");
+                to_voice(app, &json!({ "cmd": "lang", "id": lang }));
             } else {
                 stop_voice(app);
             }
@@ -1914,6 +2195,8 @@ fn main() {
         .run(|_, e| {
             if matches!(e, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
                 sidecar::QUITTING.store(true, Ordering::SeqCst);
+                #[cfg(target_os = "linux")]
+                stop_overlay_host();
             }
         });
 }
@@ -1976,5 +2259,22 @@ mod tests {
         rotate_log(&log);
         assert_eq!(std::fs::read(&old).unwrap()[0], b'y', "the newer one replaces the older .old");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn app_logs_go_in_the_roamies_data_folder_once_old_data_has_moved() {
+        let home = std::env::temp_dir().join(format!("roamies-logpath-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join(".gg").join("sidekick")).unwrap();
+        assert_eq!(log_path(&home, "sidekick.log"), Some(home.join(".gg").join("sidekick.log")), "old data not moved yet");
+        assert!(!home.join("Roamies").exists(), "and Data/ isn't created early");
+        std::fs::create_dir_all(home.join("Roamies").join("Data")).unwrap();
+        let logs = home.join("Roamies").join("Data").join("logs");
+        assert_eq!(log_path(&home, "sidekick.log"), Some(logs.join("sidekick.log")), "after the move");
+        assert!(logs.is_dir(), "the logs folder is made");
+        let fresh = home.join("fresh");
+        std::fs::create_dir_all(&fresh).unwrap();
+        assert_eq!(log_path(&fresh, "sidekick-voice.log"), Some(fresh.join("Roamies").join("Data").join("logs").join("sidekick-voice.log")), "a fresh install");
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

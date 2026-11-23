@@ -6,7 +6,7 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const ACC = '#78ffe2', HOT = '#e6fffa', MID = '#28c4b8', DEEP = '#0e5c60', EDGE = 'rgba(3,39,34,0.6)';
   const GLASS = 'rgba(6,22,24,0.94)', TEXT = '#dcfff6', DIM = '#8ab8b0', CORAL = '#ff8a7a', NOTE = '#e9a196';
-  const MONO = '"Martian Mono", ui-monospace, monospace';
+  const MONO = '"Martian Mono", "Roamies Arabic", ui-monospace, monospace';
   const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   const rgba = (h, a) => `rgba(${hex(h).join(',')},${a})`;
 
@@ -50,7 +50,7 @@
   // Words typing themselves in; the last couple land white. Returns the full width.
   function typed(c, str, x, y, font, color, u = 1, o = {}) {
     str = String(str ?? '');
-    c.save(); c.font = font; c.textBaseline = o.baseline || 'middle'; c.textAlign = 'left';
+    c.save(); c.font = R.rtlFont ? R.rtlFont(str, font) : font; c.textBaseline = o.baseline || 'middle'; c.textAlign = 'left';
     const full = c.measureText(str).width, x0 = o.anchor === 'middle' ? x - full / 2 : o.anchor === 'end' ? x - full : x;
     const n = Math.floor(str.length * clamp(u, 0, 1));
     if (n >= str.length) { c.fillStyle = color; c.fillText(str, x0, y); }

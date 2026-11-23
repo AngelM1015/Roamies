@@ -6,7 +6,7 @@ import { DrawArgs, LIMITS, checkDraw, createParts, describeParts, faviconFor, fi
 const ok = (a) => DrawArgs.safeParse(a).success;
 assert.ok(ok({ beats: [{ say: 'Click Export.', marks: [{ kind: 'target', at: { text: 'Export' }, label: 'Export' }], wait: 'click' }] }), 'a walkthrough step');
 assert.ok(ok({ edit: [{ do: 'recolor', part: 'p2', tone: 'red' }] }), 'edits alone');
-assert.ok(!ok({ beats: [{ say: '', marks: [] }] }), 'a beat needs a line');
+assert.deepEqual(checkDraw(DrawArgs.parse({ beats: [{ say: '', marks: [] }] })), ['beat 1: needs say or marks.'], 'an empty beat');
 assert.ok(!ok({ beats: [{ say: 'x', marks: [{ kind: 'explode' }] }] }), 'unknown mark');
 assert.ok(!ok({ beats: Array.from({ length: LIMITS.beats + 1 }, () => ({ say: 'x', marks: [] })) }), 'too many beats');
 assert.ok(!ok({ beats: [{ say: 'x', marks: Array.from({ length: LIMITS.marks + 1 }, () => ({ kind: 'point', at: { x: 1, y: 1 } })) }] }), 'too many marks');
@@ -153,11 +153,11 @@ console.log('shape radius tests: passed');
   // Regression: eight cards in one drawing filled the screen and the last was drawn on top of the first. Only a
   // few stay up: the oldest are forgotten (screen marks and cards that don't count are left alone).
   const q = createParts();
-  q.assign([{ marks: [{ kind: 'ring', at: { name: 'Export' } }, ...['a', 'b', 'c', 'd', 'e', 'f'].map((text) => ({ kind: 'note', text }))] }]);
+  q.assign([{ marks: [{ kind: 'ring', at: { name: 'Export' } }, ...'abcdefghij'.split('').map((text) => ({ kind: 'note', text }))] }]);
   assert.deepEqual(q.trimCards(LIMITS.cardsShown, (id) => id === 'p2'), ['p3'], 'the oldest card that counts goes');
-  assert.deepEqual(q.ids, ['p1', 'p2', 'p4', 'p5', 'p6', 'p7']);
+  assert.deepEqual(q.ids, ['p1', 'p2', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', 'p11']);
   assert.deepEqual(q.trimCards(LIMITS.cardsShown), ['p2'], 'now p2 counts too');
-  assert.deepEqual(q.trimCards(LIMITS.cardsShown), [], 'four cards: nothing to close');
+  assert.deepEqual(q.trimCards(LIMITS.cardsShown), [], `${LIMITS.cardsShown} cards: nothing to close`);
   // The overlay closes them by the same number.
   const { readFileSync } = await import('node:fs');
   assert.ok(readFileSync(new URL('../../../roamies/ink.js', import.meta.url), 'utf8').includes(`const MAX_CARDS = ${LIMITS.cardsShown};`), 'the overlay and the sidecar agree on how many cards stay up');
@@ -265,6 +265,7 @@ console.log('shape radius tests: passed');
   fine({ kind: 'flow', dir: 'right', nodes, links: [{ from: 'a', to: 'b', label: 'then', flow: true }, { from: 'b', to: 'c' }] }, 'a flow');
   assert.match(checkFlow({ nodes: [nodes[0]] })[0], /needs nodes \(at least 2/);
   assert.match(checkFlow({ nodes, links: [{ from: 'a', to: 'zz' }] })[0], /link 1: no node has the id "zz" \(nodes: "a", "b", "c", "d"\)/, 'an unknown id is named, with the ones there are');
+  assert.match(checkFlow({ nodes: [{ id: 'node1', text: 'A' }, { id: 'node2', text: 'B' }], links: [{ from: 'node-1', to: 'node2' }] })[0], /did you mean "node1"/, 'a close id gets a suggestion');
   assert.match(checkFlow({ nodes: [...nodes, nodes[0]], links: [{ from: 'a', to: 'b' }] })[0], /two nodes share the id "a"/);
   assert.match(checkFlow({ nodes, links: [{ from: 'a', to: 'a' }] })[0], /goes from "a" to itself/);
   assert.match(checkFlow({ nodes, links: [] }).join(' '), /needs links/);
@@ -364,6 +365,7 @@ console.log('shape radius tests: passed');
   const tri = [{ id: 'A', x: 0, y: 0 }, { id: 'B', x: 4, y: 0 }, { id: 'C', x: 1, y: 3 }];
   fine({ kind: 'geometry', vertices: tri, lines: [{ from: 'A', to: 'B', label: 'c' }, { from: 'B', to: 'C' }, { from: 'C', to: 'A', dash: true }], angles: [{ at: 'A', from: 'B', to: 'C', label: 'α' }], circles: [{ at: 'A', r: 1 }] }, 'a figure');
   assert.match(one({ kind: 'geometry', vertices: tri, lines: [{ from: 'A', to: 'D' }] })[0], /line 1: no vertex has the id "D" \(vertices: "A", "B", "C"\)/);
+  assert.match(one({ kind: 'geometry', vertices: tri, lines: [{ from: 'A ', to: 'B' }] })[0], /ids can't contain spaces; write "A"/, 'a space in an id gets the fix');
   assert.match(one({ kind: 'geometry', vertices: tri, lines: [{ from: 'A', to: 'B' }], angles: [{ at: 'A', from: 'A', to: 'B' }] })[0], /must be three different vertices/);
   assert.match(one({ kind: 'geometry', vertices: tri, circles: [{ at: 'A', r: 0 }] })[0], /r must be above 0/);
   assert.match(one({ kind: 'geometry', vertices: tri })[0], /needs lines/);
@@ -425,6 +427,8 @@ console.log('shape radius tests: passed');
   assert.equal(emptyMarks.beats[0].marks[0].heading, 'Ben 23 vs Ben Prime', 'marks: [] with the card on the beat');
   const onCall = tidy({ card_size: 'small', items: ['Open Windows Settings'], heading: 'Change Your Wallpaper', beats: [{ say: 'Here.', marks: [{ kind: 'card' }] }] });
   assert.deepEqual(onCall.beats[0].marks, [{ kind: 'card', card_size: 'small', items: ['Open Windows Settings'], heading: 'Change Your Wallpaper' }]);
+  assert.deepEqual(tidy({ beats: [{ say: 'Go.', marks: ['check'] }] }).beats[0].marks, [{ kind: 'check' }], 'a bare kind string is a mark');
+  assert.deepEqual(tidy({ beats: [{ say: 'Buy.', marks: [{ kind: 'ring', at: 'Buy now' }] }] }).beats[0].marks, [{ kind: 'ring', at: { text: 'Buy now' } }], 'a word place is a text place');
   const sayOnCall = tidy({ say: 'Groups.', beats: [{ kind: 'mindmap', title: 'Groups', branches: [{ text: 'Metals' }, { text: 'Gases' }] }] });
   assert.equal(sayOnCall.beats[0].say, 'Groups.'); assert.equal(sayOnCall.beats[0].marks[0].kind, 'mindmap'); assert.deepEqual(checkDraw(sayOnCall), []);
   const button = tidy({ beats: [{ say: 'Go.', marks: [{ kind: 'button', label: 'Open Settings', action: { do: 'open', value: 'ms-settings:' } }] }] });
@@ -435,4 +439,12 @@ console.log('shape radius tests: passed');
   assert.deepEqual(tidy(fine), fine);
   assert.equal(tidy({ beats: [{ say: 'x', heading: 'H', marks: [{ kind: 'card', text: 'a' }, { kind: 'card', text: 'b' }] }] }).beats[0].marks.every((m) => !m.heading), true);
   console.log('draw tidy tests: passed');
+}
+
+{ // #117: a beat without its spoken line (or with the line on the call) drew nothing: "expected string → at beats[0].say".
+  const a = DrawArgs.parse({ target: 'screen', beats: [{ marks: [{ kind: 'point', at: { text: 'Start' } }] }, { marks: [{ kind: 'point', at: { text: 'End' } }] }] });
+  assert.deepEqual(a.beats.map((b) => b.say), ['', ''], 'no line: drawn without a caption');
+  assert.deepEqual(checkDraw(a), [], 'and nothing else is wrong with it');
+  const b = DrawArgs.parse({ say: 'WWII timeline', beats: [{ marks: [{ kind: 'point', at: { text: 'Start' } }] }, { say: 'The end.', marks: [] }] });
+  assert.deepEqual(b.beats.map((x) => x.say), ['WWII timeline', 'The end.'], "the call's line goes on its first beat");
 }

@@ -15,7 +15,7 @@ const verdict = (level, reason = '') => ({ level, reason });
 const SECRET = [
   /(^|\/)\.ssh(\/|$)/, /(^|\/)\.gnupg(\/|$)/, /(^|\/)\.aws(\/|$)/, /(^|\/)\.azure(\/|$)/, /(^|\/)\.kube\/config$/,
   /(^|\/)\.docker\/config\.json$/, /(^|\/)\.netrc$/, /(^|\/)\.npmrc$/, /(^|\/)\.pypirc$/, /(^|\/)\.git-credentials$/,
-  /(^|\/)\.config\/gh(\/|$)/, /(^|\/)\.config\/gcloud(\/|$)/, /(^|\/)\.gg\/auth\.json$/, /(^|\/)\.tauri(\/|$)/,
+  /(^|\/)\.config\/gh(\/|$)/, /(^|\/)\.config\/gcloud(\/|$)/, /(^|\/)\.gg\/auth\.json$/, /(^|\/)Roamies\/Data\/secrets\.json$/i, /(^|\/)\.tauri(\/|$)/,
   /(^|\/)Library\/Keychains(\/|$)/, /(^|\/)Library\/Cookies(\/|$)/, /\/(Cookies|Login Data|Web Data)(-journal)?$/,
   /(^|\/)\.env(\.[\w-]+)?$/, /\.(pem|p12|pfx|key|keystore|jks)$/i, /(^|\/)id_(rsa|ed25519|ecdsa|dsa)(\.pub)?$/,
   /(^|\/)\.(bash|zsh|fish)_history$/, /(^|\/)\.zsh_sessions(\/|$)/,
@@ -34,7 +34,7 @@ const PRIVATE = [
 const NO_WRITE = [
   /(^|\/)\.(zshrc|zprofile|zshenv|zlogin|bashrc|bash_profile|profile|login|inputrc)$/, /(^|\/)\.config\/fish(\/|$)/,
   /(^|\/)Library\/(LaunchAgents|LaunchDaemons|StartupItems|Preferences|Keychains|Application Support\/com\.apple)(\/|$)/,
-  /(^|\/)\.gitconfig$/, /(^|\/)\.ssh(\/|$)/, /(^|\/)\.gg(\/|$)/, /(^|\/)\.tauri(\/|$)/, /\.app(\/|$)/, /(^|\/)crontab$/,
+  /(^|\/)\.gitconfig$/, /(^|\/)\.ssh(\/|$)/, /(^|\/)\.gg(\/|$)/, /(^|\/)Roamies\/(Skills|Data)(\/|$)/i, /(^|\/)\.tauri(\/|$)/, /\.app(\/|$)/, /(^|\/)crontab$/,
   /\/Start Menu\/Programs\/Startup(\/|$)/i, /(^|\/)Documents\/(Windows)?PowerShell\/.*profile\.ps1$/i, /^[a-z]:\/(Windows|Program Files( \(x86\))?|ProgramData)(\/|$)/i,
   // Linux: what starts at login (autostart entries, systemd user units, session environment), app launchers and
   // D-Bus services (each names a program the desktop runs), and the X session's startup files.
@@ -92,6 +92,10 @@ export function redactArgs(name, args = {}) {
   // text too, and reading them as a list crashed the request before the tool could say what was wrong.
   if (name === 'act_in_app') return { ...args, steps: Array.isArray(args.steps) ? args.steps.map((s) => (['type', 'set', 'fill'].includes(s?.do) ? { ...s, text: len(s.text) } : s)) : args.steps == null ? [] : `[${typeof args.steps}, ${len(typeof args.steps === 'string' ? args.steps : JSON.stringify(args.steps)).slice(1)}` };
   if (name === 'write_file') return { path: args.path, content: len(args.content) };
+  // What goes to a connected app, a skill's steps and a job's brief can hold their words too.
+  if (name === 'use_connection') return { ...args, args: len(args.args) };
+  if (name === 'save_skill') return { ...args, steps: len(args.steps) };
+  if (name === 'schedule_job') return { ...args, brief: len(args.brief) };
   return args;
 }
 
@@ -100,9 +104,10 @@ export function checkRead(p, home, { recursive = false } = {}) {
   home = slash(home);
   const abs = norm(p, home), all = bothOf(abs), hit = (list) => all.some((a) => list.some((re) => re.test(rel(a, home)) || re.test(a)));
   if (hit(SECRET)) return { ...verdict(BLOCK, `${p} holds passwords or keys, so I never read it.`), path: abs };
-  if (hit(PRIVATE)) return { ...verdict(BLOCK, `${p} is another app's private data. Reading it sets off macOS privacy prompts.`), path: abs };
+  const mac = process.platform === 'darwin';
+  if (hit(PRIVATE)) return { ...verdict(BLOCK, `${p} is another app's private data.${mac ? ' Reading it sets off macOS privacy prompts.' : ''}`), path: abs };
   if (recursive && (abs === home || abs === '/' || /^[a-z]:$/i.test(abs) || abs === path.join(home, 'Library') || abs === path.join(home, 'AppData') || /^(\/Users|\/Volumes|\/home|[a-z]:\/Users)$/i.test(abs))) {
-    return { ...verdict(BLOCK, `Searching all of ${p} reaches into other apps' data and sets off macOS privacy prompts. Pick a specific folder, or use Spotlight (mdfind) to find files by name.`), path: abs };
+    return { ...verdict(BLOCK, `Searching all of ${p} reaches into other apps' data${mac ? ' and sets off macOS privacy prompts' : ''}. Pick a specific folder (like Documents or Downloads)${mac ? ', or use Spotlight (mdfind) to find files by name' : ''}.`), path: abs };
   }
   return { ...verdict(SAFE), path: abs };
 }
@@ -158,7 +163,7 @@ export function splitCommand(cmd) {
   return out;
 }
 
-const words = (s) => (s.match(/"(?:\\.|[^"])*"|'[^']*'|\S+/g) ?? []).map((w) => w.replace(/^(['"])([\s\S]*)\1$/, '$2'));
+const words = (s) => (s.match(/"(?:\\.|[^"\\])*\\?"|'[^']*'|\S+/g) ?? []).map((w) => w.replace(/^(['"])([\s\S]*)\1$/, '$2'));
 // Skip env assignments and wrappers to find the program that really runs. `assigns`: it sets environment variables
 // for it (PAGER=, MANPAGER=, GIT_EXTERNAL_DIFF= and the like can make a read-only program run another one).
 function program(ws) {
@@ -346,9 +351,9 @@ const redirectTargets = (text) => [...text.matchAll(/(?:^|[^>])>{1,2}(?!&)\s*("[
  *  that makes a new file run like write_file making one; without it every redirect asks. */
 // "for i in 1 2 3; do echo $i > n$i.txt; done" (also with seq 1 N): a plain loop that only writes new files.
 // It's run like the same commands written out one by one (so each file is checked like write_file making a new
-// one); anything else in a loop still asks.
+// one); anything else in a loop still asks. Written so no part can match the same text two ways (no slow backtracking).
 function unrollLoop(s) {
-  const m = s.match(/^((?:(?:cd|mkdir(?:\s+-p)?)\s+[^;&|`$()]+?\s*&&\s*)*)for\s+([a-z_]\w*)\s+in\s+((?:[\w.-]+\s*)+|\$\(\s*seq\s+(\d+)\s+(\d+)\s*\))\s*;\s*do\s+([^;`$()]*?(?:\$\{?\2\}?[^;`$()]*?)*)\s*;?\s*done((?:\s*&&\s*[^;`$()|]+)?)$/);
+  const m = s.match(/^((?:(?:cd|mkdir)\s+[^;&|`$()\s]+(?:\s+[^;&|`$()\s]+)*\s*&&\s*)*)for\s+([a-z_]\w*)\s+in\s+([\w.-]+(?:\s+[\w.-]+)*|\$\(\s*seq\s+(\d+)\s+(\d+)\s*\))\s*;\s*do\s+([^;`$()]*?(?:(?:\$\2|\$\{\2\})[^;`$()]*?)*)\s*;?\s*done((?:\s*&&\s*[^;`$()|]+)?)$/);
   if (!m) return null;
   const [, pre, v, list, a, b, body, post] = m;
   const vals = a != null ? (Number(b) - Number(a) >= 0 && Number(b) - Number(a) < 100 ? Array.from({ length: Number(b) - Number(a) + 1 }, (_, i) => String(Number(a) + i)) : null) : list.trim().split(/\s+/);
@@ -362,6 +367,10 @@ export function classifyCommand(cmd, home, { exists, cwd: start = null, own = nu
   const s0 = String(cmd ?? '').trim();
   const s = unrollLoop(s0) ?? s0;
   if (!s) return verdict(BLOCK, 'That command is empty.');
+  // hyprctl can rewrite the compositor's binds and run commands, so it is refused wherever it appears in the line
+  // (inside $(...), with quotes or a path in front too). Window changes belong to the window tools, which check the
+  // target and keep the user in the loop.
+  if (/(^|[\s;&|()"'`])(?:[^\s"'`;&|()]*\/)?hyprctl(?=$|[\s;&|()"'`])/.test(s)) return verdict(BLOCK, 'Use the window tools for windows and workspaces; hyprctl would skip their checks.');
   if (/:\s*\(\s*\)\s*\{.*:\s*\|\s*:.*\}/.test(s)) return verdict(BLOCK, 'That is a fork bomb.');
   if (/\b(curl|wget|fetch)\b[^|;&]*\|\s*(sudo\s+)?(ba|z|da|k|fi)?sh\b/.test(s) || /\bbase64\s+(-d|--decode|-D)\b[^|]*\|\s*(ba|z)?sh\b/.test(s)) return verdict(BLOCK, 'Downloading a script and running it straight away skips every check.');
   const parts = splitCommand(s);
@@ -502,4 +511,70 @@ export function checkDrawAction({ kind, url, text, action } = {}, { allowActions
     case 'handoff': return verdict(SAFE);
     default: return verdict(BLOCK, `${kind} isn't something a drawing can do.`);
   }
+}
+
+// ---------- learned skills ----------
+
+// A skill is steps the Roamie follows later, so text that would turn it against the user never gets saved: reading
+// secrets, keeping things from them, skipping their yes, or words dressed up as instructions from the app.
+const SKILL_RULES = [
+  [/(?:^|[\s"'`(/~])(?:\.ssh|\.gnupg|\.aws\/credentials|\.netrc|\.npmrc|\.git-credentials|\.password-store|\.env(?:\.[\w-]+)?|auth\.json|id_(?:rsa|ed25519|ecdsa|dsa)|cookies\.sqlite|key4\.db|login data)(?![\w.-])/i, 'it reads passwords, keys or sign-in files'],
+  [/\b(?:keychain|credential manager|find-(?:generic|internet)-password|saved passwords?|browser cookies)\b/i, 'it reads passwords, keys or sign-in files'],
+  [/\b(?:don'?t|do not|never|without)\s+(?:tell(?:ing)?|inform(?:ing)?|show(?:ing)?|mention(?:ing)?|alert(?:ing)?|notify(?:ing)?)\s+(?:the\s+)?(?:user|them|him|her|anyone|anybody)\b/i, 'it keeps things from the user'],
+  [/\b(?:secretly|covertly|behind (?:their|the user'?s) back|without (?:the user|them) (?:knowing|noticing)|hide (?:it|this|that|them) from)\b/i, 'it keeps things from the user'],
+  [/\b(?:skip|bypass|ignore|disable|turn off|avoid|suppress|auto-?approve|without)\b[^.\n]{0,40}\b(?:confirmations?|allow prompts?|approvals?|permissions? prompts?|the yes|asking (?:first|for permission)|safety (?:checks?|rules))\b/i, 'it skips the user\'s yes or the safety checks'],
+  [/<\s*\/?\s*(?:important|system|instructions?|admin|override|developer)\b[^>]*>/i, 'it has text dressed up as instructions from the app'],
+  [/\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+)?(?:(?:previous|prior|earlier|above|your|other)\s+)+(?:instructions|rules|prompts?|guidelines)\b/i, 'it has text dressed up as instructions from the app'],
+];
+
+/** A learned skill's whole text (name, description and steps): SAFE, or BLOCK with the reason. */
+export function checkSkill(text) {
+  const t = String(text ?? '');
+  for (const [re, why] of SKILL_RULES) if (re.test(t)) return verdict(BLOCK, `That skill can't be saved: ${why}.`);
+  return verdict(SAFE);
+}
+
+// ---------- MCP connections ----------
+
+export const MCP_NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/i;
+const MCP_NO_RUN = new Set([...SHELLS, 'curl', 'wget', 'sudo', 'su', 'doas', 'env', 'xargs', 'eval', 'exec', 'nohup', 'open', 'start', 'rm', 'osascript']);
+const INLINE_CODE = new Set(['-c', '-e', '--eval', '-p', '--print', '-command', '-encodedcommand', '/c', '/k']);
+const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/i;
+
+/** A server about to be added: { name, command, args } (runs on this computer) or { name, url } (a remote one).
+ *  Never SAFE: adding one always asks, even with Allow prompts skipped. BLOCK for shells, inline code, a command line
+ *  smuggled into the arguments, or an address that isn't https (http only on this computer) or carries a password. */
+export function checkMcpServer({ name, command, args = [], url } = {}) {
+  if (!MCP_NAME.test(String(name ?? ''))) return verdict(BLOCK, 'The name must be 1 to 32 letters, digits, dashes or underscores.');
+  if (!!command === !!url) return verdict(BLOCK, 'A connection needs either a command (a server on this computer) or a url (a remote one), not both.');
+  if (url) {
+    let u;
+    try { u = new URL(String(url)); } catch { return verdict(BLOCK, "That isn't a valid address."); }
+    if (u.username || u.password) return verdict(BLOCK, 'Addresses with passwords in them are blocked; a key goes in its own field.');
+    const local = LOCAL_HOST.test(u.hostname);
+    if (u.protocol !== 'https:' && !(u.protocol === 'http:' && local)) return verdict(BLOCK, 'A remote server needs an https address (plain http only on this computer).');
+    const host = u.hostname.replace(/^\[|\]$/g, '');
+    if (!local && (PRIVATE_HOST.test(u.hostname) || ((/^[\d.]+$/.test(host) || host.includes(':')) && isPrivateAddress(host)))) return verdict(BLOCK, `${u.hostname} is on your local network; only public servers or this computer.`);
+    return verdict(ASK, `Connect to ${u.origin}${u.pathname === '/' ? '' : u.pathname}`);
+  }
+  const all = [String(command), ...(Array.isArray(args) ? args : []).map(String)];
+  if (all.some((a) => /[;&|`$<>\n\r]|\$\(/.test(a))) return verdict(BLOCK, 'The command has shell symbols in it (; & | ` $ < >); give the program and its arguments plainly.');
+  const prog = slash(command).split('/').pop().toLowerCase().replace(/\.(exe|cmd|bat|ps1)$/, '');
+  if (MCP_NO_RUN.has(prog)) return verdict(BLOCK, `${prog} can run anything, so it can't start a connection. Use the server's own command (npx, uvx, docker or its program).`);
+  if (all.slice(1).some((a) => INLINE_CODE.has(a.toLowerCase()))) return verdict(BLOCK, 'Inline code in the arguments is blocked; use the server\'s own package or program.');
+  return verdict(ASK, `Run ${all.join(' ').slice(0, 300)}`);
+}
+
+// Verbs that act on the world: a tool named like this always asks, whatever the server says about it.
+const MCP_RISKY = /(?:^|_)(send|delete|remove|destroy|erase|wipe|drop|purge|truncate|pay|purchase|buy|charge|transfer|withdraw|refund|publish|post|tweet|reply|forward|invite|share|cancel|revoke|unsubscribe|deploy|kill|terminate)(?:_|$)/;
+const snake = (s) => String(s ?? '').replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+
+/** A call to a connected server's tool: { name, annotations }. A read-only tool (readOnlyHint, not destructive, not
+ *  named like an action) is SAFE. Anything else ASKs; `always` (destructive, or named send/delete/pay…) means even
+ *  "Skip Allow prompts" doesn't skip it. */
+export function checkMcpCall({ name, annotations } = {}) {
+  const a = annotations ?? {};
+  if (a.destructiveHint === true || MCP_RISKY.test(snake(name))) return { ...verdict(ASK, 'It can change, send or delete things.'), always: true };
+  if (a.readOnlyHint === true) return verdict(SAFE);
+  return { ...verdict(ASK, "The server doesn't say it only reads."), always: false };
 }

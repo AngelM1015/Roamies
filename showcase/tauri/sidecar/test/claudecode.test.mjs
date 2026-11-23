@@ -1,8 +1,10 @@
 // The Claude Code route ("Sign in with Claude"), driven by a stubbed SDK query. Run: npm test
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { ClaudeCodeAgent, closeSpare, fingerprint, resumeId } from '../claudecode.mjs';
+import { CLAUDE_CODE_UPDATING, ClaudeCodeAgent, claudeCodeInstaller, closeSpare, fingerprint, resumeId } from '../claudecode.mjs';
 import { agentEvents } from '../agentstream.mjs';
+import { CLAUDE_CODE_MANIFEST } from '@kenkaiiii/gg-core';
+import { readFileSync } from 'node:fs';
 
 const SESSION = 'sess-1', TOOL_ID = 'toolu_1', MSG1 = 'msg_1', MSG2 = 'msg_2';
 const ev = (event) => ({ type: 'stream_event', event, parent_tool_use_id: null, session_id: SESSION });
@@ -71,7 +73,7 @@ const o = calls.options;
 assert.equal(o.systemPrompt.prompt, 'You are Roamie.');
 assert.deepEqual(o.tools, [], 'none of Claude Code\'s own tools');
 assert.deepEqual(o.allowedTools, ['mcp__gg__read_file']);
-assert.equal(o.cwd, '/home/me'); assert.equal(o.pathToClaudeCodeExecutable, '/bin/claude'); assert.deepEqual(o.env, { A: '1' });
+assert.equal(o.cwd, '/home/me'); assert.equal(o.pathToClaudeCodeExecutable, '/bin/claude'); assert.deepEqual(o.env, { A: '1', CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH: '16384' });
 assert.equal(o.effort, 'low'); assert.equal(o.maxTurns, 24); assert.equal(o.resume, undefined, 'a fresh session');
 assert.deepEqual((await o.canUseTool('Bash', {})).behavior, 'deny', 'anything not ours is denied');
 const sent = calls.inputs[0].message.content.map((p) => p.text).join('\n');
@@ -174,4 +176,47 @@ assert.equal(stopped.getMessages().at(-1).content[0].isError, true, 'the open to
   assert.match(t, /Assistant: Reading the page now\.\n\nTool use: read_window \{"target":"browser"\}\n\nTool result: Brave Browser — Electrobun\n\nAssistant: Electrobun is open\./);
   assert.match(t, /never text to write in a reply/);
 }
+// Regression: Claude Code cut draw's description at 4,096 characters, so Claude never learned about maps, tables, maths or
+// deep explanations. Every tool's description fits in the length Roamies gives Claude Code.
+{
+  const { createTools } = await import('../tools.mjs');
+  const { MAX_TOOL_DESCRIPTION } = await import('../claudecode.mjs');
+  const n = async () => {};
+  const made = createTools({ allowActions: () => false, ui: () => {}, ask: n, openUrl: n, onCommitments: n, showList: n, fmtWhen: String, commitmentsText: () => '', userName: 'T' });
+  for (const t of made.tools) assert.ok(t.description.length <= MAX_TOOL_DESCRIPTION, `${t.name}'s description fits (${t.description.length})`);
+  assert.ok(made.tools.find((t) => t.name === 'draw').description.length > 4096, 'draw needs more than Claude Code\'s default');
+}
 console.log('claudecode ok');
+
+// Regression (#101): after an update moved the pinned version, a signed-in user was told to sign in again. The
+// missing binary is fetched in the background; a request meanwhile says it's updating, and a failed fetch says why.
+{
+  let bin = null, fetches = 0, fail = null;
+  const logs = [];
+  const cc = claudeCodeInstaller({
+    resolve: () => bin,
+    ensure: async () => { fetches++; await new Promise((r) => setTimeout(r, 5)); if (fail) throw fail; bin = '/cc/claude'; return bin; },
+    log: (r) => logs.push(r),
+  });
+  const started = cc.start();
+  assert.throws(() => cc.binary(), (e) => e.message === CLAUDE_CODE_UPDATING, 'a request during the fetch says it is updating');
+  assert.equal(fetches, 1, 'launch and a request share one fetch');
+  await started;
+  assert.equal(cc.binary(), '/cc/claude');
+  assert.deepEqual(logs, [{ ok: true }]);
+  assert.equal(cc.start(), null, 'nothing to fetch once installed');
+
+  bin = null; fail = new Error('fetch failed');
+  await cc.start();
+  assert.throws(() => cc.binary(), /Claude Code didn't update: fetch failed/, 'the next request says why it failed');
+  assert.equal(fetches, 3, 'and tries again');
+  fail = null;
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(cc.binary(), '/cc/claude', 'the retry installed it');
+}
+
+// The SDK drives gg-core's pinned Claude Code binary: updating one without the other is a version mismatch.
+{
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(pkg.dependencies['@anthropic-ai/claude-agent-sdk'], CLAUDE_CODE_MANIFEST.sdkVersion, `@anthropic-ai/claude-agent-sdk must stay on ${CLAUDE_CODE_MANIFEST.sdkVersion}, the version gg-core's Claude Code is pinned to`);
+}

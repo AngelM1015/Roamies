@@ -16,7 +16,6 @@
   <a href="https://github.com/KenKaiii/Roamies/releases"><img src="https://img.shields.io/github/downloads/KenKaiii/Roamies/total?style=for-the-badge&label=App%20downloads&color=2ecc71" alt="Desktop app downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg?style=for-the-badge" alt="AGPL-3.0 License"></a>
   <a href="https://youtube.com/@kenkaidoesai"><img src="https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="YouTube"></a>
-  <a href="https://www.skool.com/raid"><img src="https://img.shields.io/badge/Skool-Free%20community-78ffe2?style=for-the-badge" alt="Free Skool community"></a>
   <a href="https://www.skool.com/kenkai"><img src="https://img.shields.io/badge/Skool-Raid%2B-78ffe2?style=for-the-badge" alt="Raid+ on Skool"></a>
   <a href="https://www.kenkais.com"><img src="https://img.shields.io/badge/Website-kenkais.com-78ffe2?style=for-the-badge" alt="kenkais.com"></a>
 </p>
@@ -28,8 +27,7 @@ voice, keeps track of what you said you'd do and nudges you when it's due.
 
 > [!TIP]
 > **Want to build your own apps with AI?**
-> - **Free community:** setup guides, a 7-day build challenge and 20+ projects: [skool.com/raid](https://www.skool.com/raid)
-> - **Raid+:** make money with AI, a sellable app in 30 days, live every Thursday: [skool.com/kenkai](https://www.skool.com/kenkai)
+> - **Raid+:** land your first paying client in 90 days or your money back, plus private tools you won't find anywhere else: [skool.com/kenkai](https://www.skool.com/kenkai)
 > - **Want it built for you?** [work.kenkais.com](https://work.kenkais.com/)
 
 > ⭐ **If Roamies keeps you on track, give it a star.** It's the main way other people find it.
@@ -41,19 +39,23 @@ voice, keeps track of what you said you'd do and nudges you when it's due.
 - **It talks back.** Spoken replies in its own voice, with real feeling, through [Fish Audio](https://fish.audio), or in a Gemini voice you pick, with your own [Google AI Studio](https://aistudio.google.com/apikey) key (the one you already use for a Gemini model works).
 - **It remembers.** What you said you'd do, reminders down to the second (or on repeat: "every weekday at 9", "every 2 hours"), and what matters to you.
 - **It draws on your screen.** Rings the exact button to click, walks you through each step, and sketches answers beside what you're reading.
-- **It does the clicking.** Opens apps, sites and files, and on macOS and Windows clicks or types in other apps for you.
+- **It does the clicking.** Opens apps, sites and files, and clicks or types in other apps for you (on Linux this needs the hands helper, which is Hyprland only for now).
 - **Your subscriptions.** Sign in with Claude or ChatGPT, or use an API key (Gemini, Grok, Kimi Code and more).
 
 | Pick your Roamie | What you get                                            |
 | ---------------- | ------------------------------------------------------- |
 | **JARVIS**       | **A glowing sphere of light that ripples as it speaks** |
 | Roamie           | The original: a tiny glowing pixel creature             |
+| GlayOS           | A pixel robot head with one glowing eye                 |
+| Ultren           | A pixel chrome robot with glowing eyes                  |
 | Anime Girl       | A pixel anime girl                                      |
 | Sarah            | A pixel woman                                           |
 | Adrian           | A pixel man                                             |
 | Rita X           | A pixel secretary in cat-eye glasses                    |
 
 <sub>Each one has its own name, voice and animations, in three sizes: Default, Small, or Cursor, a pixel pointer that rides along with your mouse.</sub>
+
+<sub>Some looks are fan tributes to characters from films and games. Roamies is a free project, not affiliated with or endorsed by Marvel, Disney or Valve, and all trademarks belong to their owners. If you hold the rights to one and want it removed, email [ken@kenkais.com](mailto:ken@kenkais.com).</sub>
 
 ## JARVIS shows you how
 
@@ -85,6 +87,9 @@ quizzes you answer with a click.
 - **Out of the way:** no Dock or taskbar button, a shortcut shows or hides it (see the table), Esc stops a reply.
 - **Updates itself:** updates are signature-checked before they install, then it restarts itself. The Windows installer isn't code-signed yet, so SmartScreen warns the first time. On Linux only the AppImage updates itself.
 - **Quick setup:** permissions, sign-in and a short chat so it gets to know you.
+- **Scheduled jobs:** ask for work at set times ("every weekday at 8, sum up the tech news") and a background agent does it then; see them on the panel's Abilities page, under Routines.
+- **Skills:** install any skill by asking, with a GitHub repo or folder link, a skills.sh page or just its name (it asks first). Or say "remember how to do this" and it keeps the how-to; after a long task that worked it can learn one itself (Learn skills on the General page). They're on the Abilities page, under Skills.
+- **Connections:** ask it to connect an app or service ("connect my Linear") and it finds the official MCP server, asks you first, and takes any key in the chat input. Manage them on the Abilities page, under Connections.
 
 |                        | macOS                      | Windows                     | Linux (beta)                       |
 | ---------------------- | -------------------------- | --------------------------- | ---------------------------------- |
@@ -92,10 +97,10 @@ quizzes you answer with a click.
 | Circle while talking   | Yes                        | Yes                         | No                                 |
 | Spoken replies         | Fish Audio or Gemini key   | Fish Audio or Gemini key    | Fish Audio or Gemini key           |
 | Memory and reminders   | Yes                        | Yes                         | Yes                                |
-| Read windows and point | Yes                        | Yes                         | Points from screenshots only       |
+| Read windows and point | Yes                        | Yes                         | Yes, with the helper (Hyprland)    |
 | Cards and diagrams     | Yes                        | Yes                         | Yes                                |
-| Click and type in apps | Yes                        | Yes                         | No                                 |
-| Ask about an area      | Yes (⌃⌥A)                  | Yes (Ctrl+Shift+A)          | No                                 |
+| Click and type in apps | Yes                        | Yes                         | Yes, with the helper (Hyprland)    |
+| Ask about an area      | Yes (⌃⌥A)                  | Yes (Ctrl+Shift+A)          | Yes (Ctrl+Alt+A), Hyprland only    |
 | Show or hide           | ⌃⌥S                        | Ctrl+Shift+S                | Ctrl+Alt+S, or a key you bind\*    |
 | Talk shortcut          | Hold ⌃⌥                    | Hold Ctrl+Alt               | Hold Ctrl+Alt, or a key you bind\* |
 | Type shortcut          | Tap ⌥⌘                     | Tap Ctrl+Shift              | Tap Ctrl+Shift, or a key you bind\* |
@@ -208,8 +213,11 @@ far less than on macOS and Windows. Bug reports with your distro, desktop and se
 **What works:** the Roamie on screen, the panel, typed and spoken questions (speech runs on your computer), spoken
 replies, memory and reminders, whole-screen screenshots and pointing at things on them, cards and diagrams, files and
 commands, Open at Login, and in-app updates for the AppImage (a `.deb` or `.rpm` copy opens the download page instead).
+With the bundled hands helper on Hyprland, it also reads windows, clicks and types in other apps, and asks about an area.
+The helper needs Hyprland, AT-SPI, `ydotool`, `wtype`, `wl-clipboard`, ImageMagick, `grim` and `slurp`;
+[`src-tauri/hands-linux/README.md`](showcase/tauri/src-tauri/hands-linux/README.md) lists them.
 
-**Not yet:** reading or working other apps, Ask About an Area, circling while talking, and the Cursor size on Wayland.
+**Not yet:** circling while talking, and the Cursor size on Wayland.
 
 **Wayland** (the default on Ubuntu, Fedora and KDE) doesn't let apps grab keys or see the pointer over other apps, so:
 
@@ -256,21 +264,23 @@ about the screen, go to the AI provider you pick. [PRIVACY.md](PRIVACY.md) lists
 
 1. Turn off **Open at login** (panel > Behavior), then quit Roamies from the menu bar.
 2. Drag Roamies from Applications to the Trash.
-3. Delete `~/.gg/sidekick` and `~/.gg/sidekick.json`. Keep `~/.gg/auth.json` if you use GG Coder.
+3. Delete the `~/Roamies` folder (your settings, memory, chats, skills and what agents made), and `~/.gg/sidekick`
+   and `~/.gg/sidekick.json` if they're there from an older version. Keep `~/.gg/auth.json` if you use GG Coder.
 4. Open Keychain Access, search for "Roamies" and delete the Fish Audio and Gemini voice keys.
 
 **Windows:**
 
 1. Turn off **Open at login** (panel > Behavior), then uninstall Roamies from Settings > Apps.
-2. Delete `%USERPROFILE%\.gg\sidekick` and `%USERPROFILE%\.gg\sidekick.json`. Keep `auth.json` if you use GG Coder.
+2. Delete the `%USERPROFILE%\Roamies` folder, and `%USERPROFILE%\.gg\sidekick` and `%USERPROFILE%\.gg\sidekick.json` if
+   they're there from an older version. Keep `auth.json` if you use GG Coder.
 3. Delete the voice model folder, `%LOCALAPPDATA%\Roamies\models`.
 
 **Linux:**
 
 1. Turn off **Open at login** (panel > Behavior), then quit Roamies from its tray menu (or the panel's About page).
 2. Remove the package (`sudo apt remove roamies` or `sudo dnf remove roamies`), or delete the AppImage.
-3. Delete `~/.gg/sidekick` (the voice model is in `~/.gg/sidekick/models`) and `~/.gg/sidekick.json`. Keep
-   `~/.gg/auth.json` if you use GG Coder.
+3. Delete the `~/Roamies` folder (the voice model is in `~/Roamies/Data/models`), and `~/.gg/sidekick` and
+   `~/.gg/sidekick.json` if they're there from an older version. Keep `~/.gg/auth.json` if you use GG Coder.
 4. Delete the Fish Audio key: `secret-tool clear service com.kenkai.roamies account fish-audio`.
 
 ## Build with the framework
@@ -299,12 +309,7 @@ to get started, read [CONTRIBUTING.md](CONTRIBUTING.md) before a pull request, a
 
 ## Learn with me
 
-New to building with AI? Start in **[RAID](https://www.skool.com/raid)**, my free community:
-
-- A free 7-day challenge: build your first app, one short lesson a day
-- 20+ step-by-step projects you can build yourself
-
-Want to make money with AI? **[Raid+](https://www.skool.com/kenkai)**: a sellable app in 30 days, live every Thursday.
+Want to make money with AI? **[Raid+](https://www.skool.com/kenkai)**: land your first paying client in 90 days or your money back, plus private tools you won't find anywhere else.
 
 Want it built for you? **[work.kenkais.com](https://work.kenkais.com/)**
 

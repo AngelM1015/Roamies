@@ -564,9 +564,9 @@
       $('fish-change').setAttribute('aria-expanded', String(replies.changing));
       $('fish-save').disabled = replies.saving;
       $('fish-save').textContent = replies.saving ? 'Checking…' : 'Save';
-      // Talking hands-free (needs voice): open the mic for an answer, and on macOS, wake on "Hey Roamies".
+      // Talking hands-free (needs voice): open the mic for an answer, and wake on "Hey Roamies" where there's a wake word.
       $('talk-rows').hidden = !state?.voice;
-      $('wake-row').hidden = !isMac();
+      $('wake-row').hidden = !(state?.wakeOk ?? isMac());
       $('autolisten-switch').setAttribute('aria-checked', String(!!state?.autoListen));
       $('wake-switch').setAttribute('aria-checked', String(!!state?.wakeWord));
       nav();
@@ -1162,8 +1162,8 @@
   // ---------------------------------------------------------------- flow
   // ---------------------------------------------------------------- step 0: look and size
   // Picked here, previewed on the guide right away, saved by the app (Settings has the same choices).
-  const LOOKS = [['classic', 'Roamie'], ['jarvis', 'JARVIS'], ['anime', 'Anime Girl'], ['sarah', 'Sarah'], ['adrian', 'Adrian'], ['rita', 'Rita X']], SIZES = [['default', 'Default'], ['small', 'Small'], ['cursor', 'Cursor']];
-  const LOOK_QUIPS = { classic: 'Classic me!', jarvis: 'At your service.', anime: 'Yay, hi hi!', sarah: 'Hey, nice to meet you!', adrian: 'Alright, let\'s do this.', rita: 'Shall we get to work?' }, SIZE_QUIPS = { default: 'Full size!', small: 'Fun size!', cursor: 'Tiny pointer me!' };
+  const LOOKS = [['classic', 'Roamie'], ['jarvis', 'JARVIS'], ['glayos', 'GlayOS'], ['ultren', 'Ultren'], ['anime', 'Anime Girl'], ['sarah', 'Sarah'], ['adrian', 'Adrian'], ['rita', 'Rita X']], SIZES = [['default', 'Default'], ['small', 'Small'], ['cursor', 'Cursor']];
+  const LOOK_QUIPS = { classic: 'Classic me!', jarvis: 'At your service.', glayos: 'Oh, good. A new test subject.', ultren: 'No strings. Shall we begin?', anime: 'Yay, hi hi!', sarah: 'Hey, nice to meet you!', adrian: 'Alright, let\'s do this.', rita: 'Shall we get to work?' }, SIZE_QUIPS = { default: 'Full size!', small: 'Fun size!', cursor: 'Tiny pointer me!' };
   const look = {
     radios(id, list, value, pickIt) {
       $(id).replaceChildren(...list.map(([v, label]) => {

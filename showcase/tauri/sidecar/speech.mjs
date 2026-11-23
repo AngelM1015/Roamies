@@ -32,8 +32,39 @@ export const VOICE_CUES = {
   // Background and pauses.
   effects: ['audience laughing', 'background laughter', 'crowd laughing', 'break', 'long-break'],
 };
+// What each cue looks like on the face while it's said (agent.js FEEL draws these): the cues grouped into a few
+// feelings. Cues not listed (narrator, emphasis, pauses, clear throat) leave the face as it is.
+export const FEELS = {
+  joy: ['happy', 'excited', 'satisfied', 'delighted', 'proud', 'hopeful', 'optimistic', 'enthusiastic', 'relieved', 'ecstatic', 'triumphant', 'playful', 'amused', 'cheerful', 'upbeat'],
+  laugh: ['laughing', 'chuckling', 'audience laughing', 'background laughter', 'crowd laughing'],
+  warm: ['calm', 'empathetic', 'moved', 'relaxed', 'grateful', 'sympathetic', 'compassionate', 'friendly', 'helpful', 'warm', 'gentle', 'caring', 'kind', 'soothing', 'reassuring', 'sincere', 'tender', 'whispering', 'soft tone'],
+  sad: ['sad', 'depressed', 'embarrassed', 'unhappy', 'disappointed', 'regretful', 'guilty', 'ashamed', 'pessimistic', 'nostalgic', 'lonely', 'concerned', 'apologetic', 'sheepish', 'wistful', 'sighing'],
+  cry: ['sobbing', 'crying loudly'],
+  angry: ['angry', 'upset', 'frustrated', 'disgusted', 'jealous', 'envious', 'furious', 'groaning'],
+  shout: ['shouting', 'screaming'],
+  surprised: ['surprised', 'impressed', 'gasping'],
+  scared: ['nervous', 'scared', 'worried', 'anxious', 'hysterical', 'terrified', 'panting'],
+  curious: ['curious', 'uncertain', 'doubtful', 'confused', 'mysterious', 'interested', 'thoughtful'],
+  smug: ['sarcastic', 'disdainful', 'contemptuous', 'teasing', 'mischievous', 'cheeky'],
+  flat: ['indifferent', 'bored', 'resigned', 'dry', 'deadpan', 'solemn'],
+  determined: ['confident', 'determined', 'encouraging', 'urgent', 'brave', 'serious', 'in a hurry tone'],
+  tired: ['yawning', 'snoring'],
+};
+const FEEL_OF = new Map(Object.entries(FEELS).flatMap(([f, cues]) => cues.map((c) => [c, f])));
+/** The feeling of a sentence: its first cue that has one, read from the cue's words ("[slightly sad]", "[warm and
+ * curious]", "[quietly, a little embarrassed]"), or null. */
+export function cueFeel(sentence) {
+  for (const [, inner] of String(sentence).matchAll(/\[([^\]\n]{1,60})\]/g)) {
+    for (const part of inner.toLowerCase().split(/,|\band\b/)) {
+      const words = part.trim().replace(/^(?:slightly|very|extremely|a bit|a little|quietly|deeply)\s+/, '');
+      const f = FEEL_OF.get(words) ?? words.split(/\s+/).map((w) => FEEL_OF.get(w)).find(Boolean);
+      if (f) return f;
+    }
+  }
+  return null;
+}
 export const CUE_INTENSITY = ['slightly', 'very', 'extremely', 'a bit', 'a little', 'quietly', 'deeply'];
-const alt = (list) => list.slice().sort((a, b) => b.length - a.length).map((x) => x.replace(/[-]/g, '\\-')).join('|');
+const alt = (list) => list.slice().sort((a, b) => b.length - a.length).map((x) => x.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')).join('|');
 const MOOD = alt(VOICE_CUES.emotions);
 const DELIVERY = alt([...VOICE_CUES.tones, ...VOICE_CUES.sounds, ...VOICE_CUES.effects]);
 const CUE_BODY = `(?:(?:${alt(CUE_INTENSITY)})\\s+)?(?:(?:${MOOD})(?:(?:,\\s*|\\s+and\\s+)(?:${MOOD}))?|${DELIVERY})`;
@@ -80,6 +111,23 @@ export class CueFilter {
   flush() { const h = this.held; this.held = ''; return h; }
 }
 
+const SUPERSCRIPT = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9' };
+const power = (minus, n) => (minus ? ` to the power of minus ${n} ` : n === '2' ? ' squared ' : n === '3' ? ' cubed ' : ` to the power of ${n} `);
+const MATH_WORDS = [
+  [/(?<=\d)\s*°\s*C\b/g, ' degrees Celsius'], [/(?<=\d)\s*°\s*F\b/g, ' degrees Fahrenheit'], [/°/g, ' degrees'],
+  [/÷/g, ' divided by '], [/[×✕]/g, ' times '], [/(?<=\d)\s*[*·⋅]\s*(?=\d)/g, ' times '], [/−/g, ' minus '],
+  [/±/g, ' plus or minus '], [/∛/g, ' the cube root of '], [/√/g, ' the square root of '],
+  [/≈/g, ' is about '], [/≠/g, ' is not equal to '], [/≤/g, ' is less than or equal to '], [/≥/g, ' is greater than or equal to '],
+  [/π/g, ' pi '], [/∞/g, ' infinity '], [/½/g, ' one half '], [/¼/g, ' one quarter '], [/¾/g, ' three quarters '],
+];
+// Voices read raw maths symbols oddly (3² or ÷), so they are said as words (#120).
+function mathWords(s) {
+  s = s.replace(/(⁻)?([⁰¹²³⁴⁵⁶⁷⁸⁹]+)/g, (_, m, d) => power(m, [...d].map((c) => SUPERSCRIPT[c]).join('')))
+    .replace(/(?<=[\p{L}\p{N})])\^(-)?(\d+)/gu, (_, m, n) => power(m, n));
+  for (const [re, word] of MATH_WORDS) s = s.replace(re, word);
+  return s;
+}
+
 export function speakable(text) {
   let s = String(text ?? '');
   s = s.replace(/\[([^\]]*)\]\((?:https?:|mailto:)[^)]*\)/g, '$1') // [name](url) → name
@@ -88,6 +136,7 @@ export function speakable(text) {
     .replace(/(\*\*|__|\*|~~)(?=\S)([^*~]*?\S)\1/g, '$2') // bold, italic, strike
     .replace(/(?:^|\s)(?:~|\/)?(?:[\w.-]+\/){2,}[\w-]*(?:\.\w+)*/g, ' ') // file paths (the sentence's full stop stays)
     .replace(/\[([^\]]{1,40})\]/g, (m, inner, at, all) => (IS_CUE.test(m) || (LOOSE.test(m) && SENTENCE_START.test(all.slice(0, at))) ? m.toLowerCase() : inner)) // voice cues stay; [placeholders] lose their brackets (Fish would act them out)
+    .replace(/[\s\S]+/, mathWords)
     .replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{FE0F}\u{200D}\u{20E3}]/gu, '')
     .replace(/\(\s*\)|\[\s*\]/g, '')
     .replace(/\s+([,.!?;:])/g, '$1')
@@ -96,14 +145,43 @@ export function speakable(text) {
   return /[\p{L}\p{N}]/u.test(s.replace(CUE, '')) ? s : '';
 }
 
+// VoiceStudio's first chunk (early): cut at the first clause break or sentence end that is EARLY_MIN characters in,
+// else at a word once EARLY_WORDS are in with no sentence ended. Returns { end, from } (the chunk is line.slice(0, end)
+// and the text goes on from `from`), or null to take the normal sentence rules.
+const EARLY_MIN = 30, EARLY_WORDS = 60;
+function earlyCut(line, nl, all) {
+  let best = null;
+  const take = (end, from) => { if (end >= EARLY_MIN && (!best || end < best.end)) best = { end, from }; };
+  for (const m of line.matchAll(/[,;:](?=\s)/g)) take(m.index + 1, m.index + 1);
+  for (const m of line.matchAll(/\s[-–—](?=\s)/g)) take(m.index, m.index + m[0].length); // a spaced dash: not said
+  let ended = false;
+  for (const m of line.matchAll(SENTENCE_END)) {
+    const end = m.index + m[0].length;
+    if (end < line.length || nl >= 0 || all) { ended = true; take(end, end); } // at the end of a finished reply, its last sentence is complete
+  }
+  if (best) return best;
+  if (ended || line.length < EARLY_WORDS) return null;
+  const sp = line.lastIndexOf(' ', EARLY_WORDS);
+  return sp > 0 ? { end: sp, from: sp } : null;
+}
+
+/**
+ * opts: early (VoiceStudio: the first chunk is short, see earlyCut) and cap (characters; 0: no cap). Once the spoken
+ * characters reach cap, nothing more is emitted (the caller still shows the whole reply as text).
+ */
 export class SpeechText {
-  constructor(emit) {
+  constructor(emit, { early = false, cap = 0 } = {}) {
     this.emit = emit; // (sentence) => void, each one cleaned and non-empty
     this.buf = '';
     this.atLineStart = true;
     this.fence = false;
     this.skip = false; // inside a screen-only line
     this.tone = null; // a cue for the next sentence, from the body's emote, when it has none of its own
+    this.early = !!early;
+    this.cap = Math.max(0, Number(cap) || 0);
+    this.chunks = 0; // chunks emitted so far
+    this.spoken = 0; // characters emitted so far
+    this.capped = false;
   }
 
   /** The body's emote ([hype] etc.) colours the next sentence. */
@@ -115,14 +193,18 @@ export class SpeechText {
   flush() { this.drain(true); }
 
   out(s) {
+    if (this.capped) return;
     let t = speakable(s);
     if (!t) return;
     if (this.tone) { if (!/^\[/.test(t)) t = `${this.tone} ${t}`; this.tone = null; }
     this.emit(t);
+    this.chunks++; this.spoken += t.length;
+    if (this.cap && this.spoken >= this.cap) this.capped = true;
   }
 
   drain(all) {
     for (;;) {
+      if (this.capped) { this.buf = ''; return; } // past the spoken cap: the rest is text only
       if (!this.buf) return;
       if (this.atLineStart) {
         const nl = this.buf.indexOf('\n');
@@ -144,18 +226,24 @@ export class SpeechText {
       if (nl === 0) { this.buf = this.buf.slice(1); this.atLineStart = true; continue; } // blank line
       // Prose: a full line, or a sentence that has ended.
       const line = nl < 0 ? this.buf : this.buf.slice(0, nl);
-      SENTENCE_END.lastIndex = 0;
-      let cut = -1, m;
-      while ((m = SENTENCE_END.exec(line))) { if (m.index + m[0].length < line.length || nl >= 0) { cut = m.index + m[0].length; break; } }
-      if (cut < 0 && nl >= 0) cut = nl;
-      if (cut < 0 && line.length > LONG) { const sp = line.lastIndexOf(', ', LONG); cut = sp > 40 ? sp + 1 : line.lastIndexOf(' ', LONG); }
-      if (cut <= 0) {
-        if (all) { this.out(this.buf); this.buf = ''; }
-        return;
+      const first = this.early && !this.chunks ? earlyCut(line, nl, all) : null;
+      let cut = -1, from = -1;
+      if (first) { cut = first.end; from = first.from; }
+      else {
+        SENTENCE_END.lastIndex = 0;
+        let m;
+        while ((m = SENTENCE_END.exec(line))) { if (m.index + m[0].length < line.length || nl >= 0) { cut = m.index + m[0].length; break; } }
+        if (cut < 0 && nl >= 0) cut = nl;
+        if (cut < 0 && line.length > LONG) { const sp = line.lastIndexOf(', ', LONG); cut = sp > 40 ? sp + 1 : line.lastIndexOf(' ', LONG); }
+        if (cut <= 0) {
+          if (all) { this.out(this.buf); this.buf = ''; }
+          return;
+        }
+        from = cut;
       }
       this.out(line.slice(0, cut));
-      this.buf = this.buf.slice(cut);
-      if (cut === nl || /^\n/.test(this.buf)) { this.buf = this.buf.replace(/^\n/, ''); this.atLineStart = true; }
+      this.buf = this.buf.slice(from);
+      if (from === nl || /^\n/.test(this.buf)) { this.buf = this.buf.replace(/^\n/, ''); this.atLineStart = true; }
       else this.buf = this.buf.replace(/^[ \t]+/, '');
     }
   }

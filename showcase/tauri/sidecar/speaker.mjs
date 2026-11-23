@@ -17,6 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_VOICE, FISH_MODELS, FREE_MODEL, FishVoice, RATE, fishAccount } from './fish.mjs';
 import { StudioVoice, studioStatus } from './voicestudio.mjs';
+import { cueFeel } from './speech.mjs';
 import { GEMINI_DEFAULT_VOICE, GEMINI_MODEL, GEMINI_MODELS, GEMINI_PITCH, GEMINI_RATE, GeminiVoice, geminiAccount } from './gemini.mjs';
 
 // The services that can speak. models: priciest first, the pick and the ones after it are tried in turn; pick:
@@ -46,7 +47,15 @@ export const BEATS = [
   'Moment.', 'Okay, checking.', 'Sure, checking.', 'Okie-dokie.',
 ];
 const RECENT = 8; // a beat isn't picked again until this many others have played
+// After a model failed and a cheaper one took over, replies go back to the user's pick once this has passed.
+const BACK_TO_PICK_MS = 10 * 60_000;
 const PREWARM_MS = 20_000; // a socket opened ahead of a reply that nothing takes is closed after this
+// VoiceStudio: how much of a reply is spoken, in characters (its text is always all shown). 0: no cap.
+export const STUDIO_CAPS = { short: 160, medium: 320, full: 0 };
+// VoiceStudio reaps its engine after ~5 minutes idle, so after a real reply a throwaway word goes out every 4 minutes,
+// until 30 minutes pass with no real reply. Prewarm (talking or typing) pings only when the last request is older than 60 s.
+const KEEP_WARM_MS = 4 * 60_000, KEEP_WARM_IDLE_MS = 30 * 60_000, STUDIO_QUIET_MS = 60_000;
+const STUDIO_PING = 'Hm.';
 
 // The beats shipped with the app (beats/make.mjs), next to this file or the bundle: (voice, model) → Map of phrase →
 // { rate, pcm } (base64), or null for a voice or model not recorded. The free tier uses the S2.1 Pro takes.
@@ -75,10 +84,15 @@ export function voiceProblemText(what, name) {
 }
 
 // beatStore: { read(name), write(name, data) }, where beats made here are kept between runs (none: made again each run).
-export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, FishVoiceImpl = FishVoice, account = fishAccount, providers = {}, beatPhrases = BEATS, bundled = bundledBeats(), beatStore = null, LocalVoiceImpl = StudioVoice, localStatus = studioStatus, prewarmMs = PREWARM_MS }) {
+export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, FishVoiceImpl = FishVoice, account = fishAccount, providers = {}, beatPhrases = BEATS, bundled = bundledBeats(), beatStore = null, LocalVoiceImpl = StudioVoice, localStatus = studioStatus, prewarmMs = PREWARM_MS,
+  keepWarmMs = KEEP_WARM_MS, keepWarmIdleMs = KEEP_WARM_IDLE_MS, studioQuietMs = STUDIO_QUIET_MS, now = () => Date.now(), setTimer = (f, ms) => setTimeout(f, ms), clearTimer = (h) => clearTimeout(h) }) {
   const all = { ...PROVIDERS, fish: { ...PROVIDERS.fish, Voice: FishVoiceImpl, account }, ...providers };
   let P = all.fish; // the service in use
-  let key = null, voice = P.defaultVoice, pref = P.pick ?? P.models[0], model = pref, seq = 0, current = null, checking = null;
+  let key = null, voice = P.defaultVoice, pref = P.pick ?? P.models[0], model = pref, seq = 0, current = null, checking = null, downAt = 0;
+  // A stand-in model (not the free tier, which the account check manages) gives way to the pick after a while.
+  const backToPick = () => {
+    if (model !== pref && model !== P.freeModel && now() - downAt >= BACK_TO_PICK_MS) { model = pref; log('speech_model', { model, why: 'back to the pick' }); }
+  };
   // The pick and the cheaper ones after it (models run from priciest to free).
   const chain = () => P.models.slice(Math.max(0, P.models.indexOf(pref)));
   let beats = new Map(), recent = [], warming = null; // phrase → [base64 PCM], for the current key, voice and model
@@ -152,7 +166,9 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
   }
 
   // VoiceStudio: on while picked (it needs no key); local is its last check ({ ok, reason, message, engine, voices, … }).
-  let localOn = false, localVoice = null, local = null;
+  let localOn = false, localVoice = null, local = null, studioMode = 'short';
+  let lastReq = -Infinity, lastReply = -Infinity; // VoiceStudio: when its last request went out, and its last real reply
+  let warmTimer = null, pinging = null; // the keep-warm schedule (null: off); the throwaway request in flight
   // Is VoiceStudio up, with a usable engine selected? Never throws; the answer is kept for the panel.
   async function checkLocal() {
     const s = await localStatus().catch((e) => ({ ok: false, reason: 'offline', message: e.message }));
@@ -160,9 +176,46 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
     log('voicestudio_status', { ok: s.ok, reason: s.reason, engine: s.engine });
     return s;
   }
+  // One throwaway request: a short word whose audio is thrown away and nothing is emitted. Best effort: it never
+  // throws or logs, and it's skipped while a reply runs or another throwaway is still out.
+  function ping() {
+    if (pinging || current) return false;
+    lastReq = now();
+    let v = null;
+    const done = () => { if (pinging === v) pinging = null; };
+    try {
+      v = new LocalVoiceImpl({ voice: localVoice, onAudio() {}, onEnd: done, onError: done });
+      pinging = v;
+      v.open?.(); v.say(STUDIO_PING); v.end();
+    } catch { done(); }
+    return true;
+  }
+  // Keep-warm: a real reply starts the schedule (never before the first one); each tick pings while there's no reply in
+  // flight, and the schedule ends once 30 minutes have passed since the last real reply.
+  function keepWarm() {
+    if (!localOn) return;
+    lastReply = now();
+    if (warmTimer === null) armWarm();
+  }
+  function armWarm() {
+    warmTimer = setTimer(warmTick, keepWarmMs);
+    warmTimer?.unref?.();
+  }
+  function warmTick() {
+    warmTimer = null;
+    if (!localOn || now() - lastReply >= keepWarmIdleMs) return;
+    if (!current) ping();
+    armWarm();
+  }
+  // Ends the keep-warm schedule (the provider changed, or voice replies were turned off).
+  function stopWarm() {
+    if (warmTimer !== null) clearTimer(warmTimer);
+    warmTimer = null;
+  }
   // A reply in VoiceStudio: its socket opens now, one request per sentence, played as each streams in.
   function startLocal() {
     stopAll();
+    lastReq = now(); keepWarm();
     const id = `s${++seq}`, said = [], t0 = Date.now();
     let heard = false, done = false, v = null;
     const finish = (whole = false) => {
@@ -205,7 +258,10 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
   // the connection (0.4-1.4 s). The socket has placeholder callbacks until start() takes it; one nothing takes is
   // closed after prewarmMs.
   function prewarm() {
-    if (localOn || !key || P.id !== 'fish') return;
+    // VoiceStudio: its engine is woken with a throwaway word when the last request is old enough (and no reply runs).
+    if (localOn) { if (!current && now() - lastReq > studioQuietMs) ping(); return; }
+    if (!key || P.id !== 'fish') return;
+    backToPick();
     const w = prewarmed;
     if (w && w.key === key && w.voice === voice && w.model === model && w.p === P && w.v.state !== 'done') return;
     dropPrewarm();
@@ -238,11 +294,20 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
     if (localOn) return startLocal();
     if (!key) return null;
     stopAll();
+    backToPick();
     const id = `s${++seq}`, said = [];
     let ended = false, tries = 0, v = null, heard = false, done = false, beat = false, t0 = Date.now();
+    // The face follows the voice: a sentence whose feeling differs from the last one's (speech.mjs cueFeel) is marked
+    // with where it starts, in characters spoken so far (cues left out); the overlay times it by the audio played.
+    let spoken = 0, feel = null;
+    const mark = (s) => {
+      const f = cueFeel(s);
+      if (f !== feel) { feel = f; emit({ kind: 'speech', id, feel: f, at: spoken }); }
+      spoken += s.replace(/\[[^\]]*\]\s*/g, '').length + 1;
+    };
     const me = {
       id,
-      say(s) { if (done) return; said.push(s); v.say(s); },
+      say(s) { if (done) return; mark(s); said.push(s); v.say(s); },
       /** Something slow is starting: a short beat, unless it's already said something. */
       beat() {
         if (done || beat || said.length || heard) return false;
@@ -250,6 +315,7 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
         const phrase = pickBeat(), shippedBeat = shipped()?.get(phrase), chunks = beats.get(phrase);
         if (!shippedBeat && !chunks) { me.say(phrase); return true; }
         log('speech_beat', { id, ms: Date.now() - t0 });
+        spoken += phrase.length + 1; // played ahead of the reply, so the feelings after it start later
         if (shippedBeat) emit({ kind: 'speech', id, rate: shippedBeat.rate, pcm: shippedBeat.pcm });
         else for (const pcm of chunks) emit({ kind: 'speech', id, rate: P.play ?? P.rate, pcm });
         return true;
@@ -271,7 +337,7 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
       const cbs = {
         onAudio: (pcm) => {
           if (done) return;
-          if (!heard) { heard = true; if (m !== model) model = m; log('speech_first_audio', { id, model: m, ms: Date.now() - t0 }); }
+          if (!heard) { heard = true; if (m !== model) { model = m; downAt = now(); } log('speech_first_audio', { id, model: m, ms: Date.now() - t0 }); }
           emit({ kind: 'speech', id, rate: P.play ?? P.rate, pcm: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64') });
         },
         onEnd: () => finish(true),
@@ -341,11 +407,18 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
         return;
       }
       if (!p || (p === P && !localOn)) return;
+      stopWarm();
       if (key || localOn) stopAll(); // nothing can be playing without a key or VoiceStudio (and nothing is sent when the app is just starting)
       localOn = false; P = p; key = null; checking = null; warming = null; beats = new Map();
       voice = p.defaultVoice; pref = p.pick ?? p.models[0]; model = pref;
     },
     get provider() { return localOn ? 'voicestudio' : P.id; },
+    // How the reply is cut for the SpeechText: VoiceStudio's first chunk is short and its spoken part is capped; others as before.
+    localOpts() { return localOn ? { early: true, cap: STUDIO_CAPS[studioMode] ?? 0 } : { early: false, cap: 0 }; },
+    // How much VoiceStudio speaks of a reply: 'short', 'medium' or 'full' (anything else is ignored).
+    setStudioSpeak(m) { if (Object.hasOwn(STUDIO_CAPS, m)) studioMode = m; },
+    get studioSpeak() { return studioMode; },
+    stopWarm,
     // The VoiceStudio voice (a saved profile id; null: the engine's default voice).
     setLocalVoice(v) { localVoice = typeof v === 'string' && v ? v : null; },
     get localVoice() { return localVoice; },

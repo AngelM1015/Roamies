@@ -4,9 +4,9 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { dataPaths } from './datadir.mjs';
 
 export const MODEL = {
   id: 'parakeet-tdt-0.6b-v3-int8',
@@ -22,7 +22,7 @@ export const totalBytes = (model = MODEL) => model.files.reduce((n, f) => n + f.
 export const sizeLabel = (model = MODEL) => `${Math.round(totalBytes(model) / 1e6)} MB`;
 
 export function modelDir(model = MODEL) {
-  const root = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Roamies') : path.join(os.homedir(), '.gg', 'sidekick');
+  const root = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Roamies') : dataPaths().dir;
   return path.join(root, 'models', model.id);
 }
 

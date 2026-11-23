@@ -58,8 +58,9 @@ html, body { height: 100%; background: transparent; }
   75% { opacity: 1; -webkit-mask: var(--d3) 0 0 / 2px 2px; mask: var(--d3) 0 0 / 2px 2px; }
   100% { opacity: 1; -webkit-mask: none; mask: none; }
 }
-/* A row being taken away (forgotten, done, dropped) dissolves out the same way, then the list closes up. */
-.item.leaving { animation: dissolve-out 200ms step-end both; pointer-events: none; }
+/* A row being taken away (removed, forgotten, done, dropped) dissolves out the same way, then the list closes up. */
+.list > li.leaving { animation: dissolve-out 200ms step-end both; pointer-events: none; }
+.list > li.gone { display: none; }
 @keyframes dissolve-out {
   0% { -webkit-mask: var(--d3) 0 0 / 2px 2px; mask: var(--d3) 0 0 / 2px 2px; }
   33% { -webkit-mask: var(--d2) 0 0 / 2px 2px; mask: var(--d2) 0 0 / 2px 2px; }
@@ -93,6 +94,8 @@ html, body { height: 100%; background: transparent; }
 .by { margin: 2px 0 0; font-size: var(--t-small); line-height: 1.35; color: var(--ink-3); }
 /* Quit, top right: asks first (the .arm Confirm, like Forget). */
 .head-quit { flex: none; margin-inline-start: auto; font-size: var(--t-small); }
+.head-close { flex: none; margin-inline-start: 0; }
+.head-close svg { display: block; }
 
 /* ---------- look tiles: each look, live ---------- */
 .looks { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
@@ -116,7 +119,6 @@ html, body { height: 100%; background: transparent; }
 :root { --side: 148px; }
 .side { display: flex; flex-direction: column; gap: 4px; padding: 12px 10px var(--gut); border-right: 1px dashed var(--line); overflow-y: auto; }
 .nav { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
-.side-label { margin: 14px 8px 4px; font: 700 var(--t-small)/1.3 var(--mono); font-stretch: 87.5%; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
 /* A page link: quiet text until it's hovered or current; the current one sits in the accent LED frame. */
 .navi {
   appearance: none; border: 0; cursor: pointer; width: 100%;
@@ -140,9 +142,14 @@ html, body { height: 100%; background: transparent; }
 .pane { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: var(--group); padding: 12px 0 var(--gut); }
 .pane.paged { padding-bottom: 0; }
 .pane:not(.paged) { overflow-y: auto; margin-inline-end: calc(-1 * var(--gut)); padding-inline-end: var(--gut); }
+/* In a page that scrolls, a list keeps the height its rows need instead of shrinking to the room that is left. */
+.pane:not(.paged) .group.paged, .pane:not(.paged) .pagebox { flex: none; }
 .pane[hidden] { display: none; }
 /* A paged list takes the room left and shows as many rows as fit there (panel.js measures). */
 .group.paged { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* One tab's part of a page (Model, Listening): its sections stacked as on a page; on a paged tab it takes the room. */
+.tabpanel { display: flex; flex-direction: column; gap: var(--group); min-width: 0; min-height: 0; }
+.pane.paged .tabpanel { flex: 1; }
 .pagebox { flex: 1; min-height: 0; overflow: hidden; }
 /* An account: its row, and its key field under it while that's open. */
 .acct { display: grid; gap: 6px; padding: 4px 0; }
@@ -179,7 +186,8 @@ html, body { height: 100%; background: transparent; }
 .ghead h2 { display: flex; align-items: baseline; gap: 8px; font-size: var(--t-head); }
 .ghead h2 .n { font-weight: 500; color: var(--ink-3); }
 /* A description reads at the same size as the rows under it; it's quieter by colour, not by size. */
-.ghead p { margin: 0; font-size: var(--t-body); line-height: 1.4; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A section's description wraps rather than being cut off: it's the only place that says what the section is for. */
+.ghead p { margin: 0; font-size: var(--t-body); line-height: 1.4; color: var(--ink-3); overflow-wrap: break-word; text-wrap: pretty; }
 .sub { margin: 0; font: 700 var(--t-small)/1.3 var(--mono); font-stretch: 87.5%; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
 
 /* Buttons here are a size down from the guide's; mini ones (header, footer, row ends) a size down again. */
@@ -223,7 +231,8 @@ html, body { height: 100%; background: transparent; }
 /* A question: two stacked bars, like a quote, instead of a dot. */
 .item.ask .mark { background: none; border-left: 3px solid var(--ink-3); border-right: 3px solid var(--ink-3); height: 8px; width: 9px; }
 .row-btns { display: inline-flex; gap: 10px; }
-.empty { margin: 0; font-size: var(--t-body); line-height: 1.4; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* What to do when a list is empty: it wraps, never cut off, since it's the hint they need. */
+.empty { margin: 0; font-size: var(--t-body); line-height: 1.4; color: var(--ink-2); overflow-wrap: break-word; text-wrap: pretty; }
 .usage { margin: 0; font-size: var(--t-small); line-height: 1.4; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* A long list: a search field once there are more than a page, and "Show more" at the end. */
@@ -263,6 +272,10 @@ html, body { height: 100%; background: transparent; }
 
 /* ---------- settings ---------- */
 .setting { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 32px; }
+/* A dropdown shrinks before its label does: OpenRouter's long model names squashed the labels to a letter (#124). */
+.setting:has(> .field.select) { grid-template-columns: minmax(min(9em, 45%), 1fr) auto; }
+.setting > .field.select { min-width: 0; }
+.setting > .field.select select { width: 100%; text-overflow: ellipsis; }
 .setting > span { min-width: 0; font-size: var(--t-body); line-height: 1.35; color: var(--ink); }
 .setting > span small { display: block; font-size: var(--t-small); line-height: 1.35; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .setting .link { white-space: nowrap; }
@@ -297,7 +310,47 @@ html, body { height: 100%; background: transparent; }
 /* Why pick a choice: one line under it, quieter than the setting it explains. */
 .why { margin: -2px 0 0; font-size: var(--t-small); line-height: 1.4; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .why.late { color: var(--danger); }
+/* A longer hint (a setting's small line, or a whole sentence under a choice) wraps instead of cutting off. */
+.why.wrap, .setting > span small.wrap { white-space: normal; }
 .setting small.bad { color: var(--danger); white-space: normal; }
+
+/* ---------- effort: how hard a model thinks, a slider under its model choice ---------- */
+/* A slot's block: its model row, then its Effort slider, full width like the rows. --t: the thumb's width, which the
+   thumb's travel and the stops' names both allow for. */
+.slot { display: grid; gap: 6px; min-width: 0; }
+.effort { --t: 12px; display: grid; gap: 6px; min-width: 0; container-type: inline-size; }
+.effort-none { margin: 0; font-size: var(--t-small); line-height: 1.4; color: var(--ink-3); }
+/* The slider: a slim track in the accent, filled up to the stop (--p, 0 to 1); the thumb is a small square. */
+.effort-range { appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 16px; margin: 0; padding: 0; background: transparent; cursor: pointer; }
+.effort-range:focus { outline: none; }
+/* Not the text fields' padding (.body input): the track runs the full width. */
+.body .effort-range { padding: 0; }
+.effort-range::-webkit-slider-runnable-track {
+  height: 4px; margin-top: 6px;
+  background: linear-gradient(to right, var(--accent) calc(var(--t) / 2 + (100% - var(--t)) * var(--p, 0)), var(--line) 0);
+}
+/* Centred on the 4px track: (4 - 12) / 2. */
+.effort-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -4px; border: 0; border-radius: 0;
+  background: var(--accent); box-shadow: 0 0 8px rgba(120, 255, 226, 0.6); cursor: pointer;
+}
+.effort-range::-moz-range-track { height: 4px; background: var(--line); }
+.effort-range::-moz-range-progress { height: 4px; background: var(--accent); }
+.effort-range::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 0; background: var(--accent); box-shadow: 0 0 8px rgba(120, 255, 226, 0.6); cursor: pointer; }
+.effort-range:focus-visible::-webkit-slider-thumb { background: var(--ink); box-shadow: 0 0 0 2px var(--bg); }
+.effort-range:focus-visible::-moz-range-thumb { background: var(--ink); box-shadow: 0 0 0 2px var(--bg); }
+/* The stops' names under their stops (--i of --n): the first and last flush with the ends of the track, the others
+   centred on the thumb's place. The current stop is lit. */
+.effort-ticks { position: relative; height: 1.2em; font: 500 var(--t-small)/1.2 var(--mono); }
+.effort-ticks span { position: absolute; top: 0; left: calc(var(--t) / 2 + (100% - var(--t)) * var(--i) / (var(--n) - 1)); transform: translateX(-50%); color: var(--ink-3); white-space: nowrap; }
+.effort-ticks span:first-child { left: 0; transform: none; }
+.effort-ticks span:last-child { left: auto; right: 0; transform: none; }
+.effort-ticks span.on { color: var(--accent); font-weight: 700; }
+/* Narrow: the names of the middle stops step aside (they keep their place), so the ends and the lit stop never collide. */
+@container (max-width: 240px) {
+  .effort-ticks span:not(:first-child):not(:last-child):not(.on) { visibility: hidden; }
+}
+.effort-hint { margin: 0; }
 
 /* Tooltip: a small LED-framed card against its control, dissolving in like the rows. */
 .tip {
@@ -322,6 +375,33 @@ html, body { height: 100%; background: transparent; }
 .note[hidden] { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .frame.opening, .frame.shutting, .pane.enter > *, .pane.enter .list > li, .navi.ping, .item.leaving, .note, .arm[aria-pressed="true"] > .yes { animation: none; }
+  .frame.opening, .frame.shutting, .pane.enter > *, .pane.enter .list > li, .navi.ping, .list > li.leaving, .note, .arm[aria-pressed="true"] > .yes { animation: none; }
   .navi, .arm > span, .tab, .ibtn, .ibtn > span { transition: none; }
 }
+
+/* Arabic and Hebrew in a list (dir=auto on the text): the Arabic font first, for its own word spacing. */
+.item .text:dir(rtl) { font-family: "Roamies Arabic RTL", var(--mono); }
+
+/* Token use over time (Home): today's four counts, then the last week as short columns (one muted fill: the
+   view's one accent fill stays on Ask). Kept short so Recent keeps its rows at the panel's 560px. */
+.pane.paged > .usage-group { flex: none; padding-bottom: var(--gut); } /* last on Home, where no footer gives the bottom its room */
+.usage-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--step); align-items: end; }
+.usage-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.usage-card { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 6px 7px; border: 1px solid var(--line); }
+.usage-card .k { font-size: var(--t-small); line-height: 1.3; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.usage-card .v { font-size: var(--t-body); line-height: 1.3; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.usage-week { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(7, 16px); gap: 5px; }
+.usage-day { display: grid; justify-items: center; gap: 3px; }
+.usage-track { display: flex; align-items: flex-end; width: 100%; height: 30px; border-bottom: 1px solid var(--line-hi); }
+.usage-bar { display: block; width: 100%; background: var(--accent-lo); }
+.usage-day .d { font-size: 10px; line-height: 1.2; color: var(--ink-3); }
+
+/* Connections: each one on two lines, its name and switch, then its approval choice and actions. */
+.conn { gap: 6px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+.conn:last-child { border-bottom: 0; }
+.conn-acts { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.conn-acts .row-btns { margin-inline-start: auto; }
+.conn-trust { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--t-small); line-height: 1.3; color: var(--ink-3); }
+.conn-trust .field.select { flex: none; }
+.conn-trust select { flex: none; padding: 5px 26px 5px 8px; font-size: var(--t-small); line-height: 1.25; background-position: right 9px center; }
+.conn-trust select:disabled { color: var(--ink-3); cursor: default; }

@@ -16,7 +16,7 @@
   let state = null, tab = 'home', deferred = false;
   // What's open in the panel itself: a key field (provider id, 'fish' or 'gemini'), the row action waiting for its
   // Confirm, each long list's page (pg) and how many rows fit on one (per, measured), Memory's tab and its search.
-  const ui = { key: null, kind: {}, arm: null, add: { label: '', url: '', key: '', images: false }, addSent: null, pg: {}, per: {}, base: {}, rec: null, mtab: 'facts', q: '', bindShown: new Set() };
+  const ui = { key: null, kind: {}, arm: null, add: { label: '', url: '', key: '', images: false }, addSent: null, pg: {}, per: {}, base: {}, rec: null, mtab: 'facts', tabs: {}, q: '', bindShown: new Set() };
   let armTimer = 0;
   const disarm = () => { clearTimeout(armTimer); if (ui.arm) { ui.arm = null; return true; } return false; };
 
@@ -61,7 +61,19 @@
     if (!id) return;
     shutBlock(`key-${id}`, () => { if (ui.key === id) { ui.key = null; render(`addkey:${id}`); } });
   }
-  const leave = (from, id) => { from.closest('.item')?.classList.add('leaving'); setTimeout(() => act(id), REDUCED.matches ? 0 : 190); };
+  // A row being removed dissolves out, then leaves the list at once (the rows below step up as it goes, so no empty
+  // gap waits for the sidecar). Until the new state drops it, every redraw keeps it out, so it never blinks back; if
+  // the removal didn't happen after a few seconds, it returns.
+  const gone = new Map(); // the row's action key → when to give up on it
+  const rowOf = (k) => document.querySelector(`.pane [data-k="${CSS.escape(k)}"]`)?.closest('li');
+  const keepGone = () => { for (const [k, until] of gone) { if (Date.now() > until) gone.delete(k); else rowOf(k)?.classList.add('gone'); } };
+  const leave = (from, id) => {
+    const k = from.dataset.k, row = from.closest('li');
+    if (k) gone.set(k, Date.now() + 4000);
+    row?.classList.add('leaving');
+    setTimeout(() => { row?.classList.add('gone'); act(id); }, REDUCED.matches ? 0 : 190);
+    setTimeout(() => { if (k && gone.delete(k) && rowOf(k)) render(); }, 4100);
+  };
   // Asks first in the same spot: the first press turns it into Confirm (for 4 s), the second does it.
   const armed = (label, yes, k, id, aria) => {
     const on = ui.arm === k;
@@ -100,11 +112,20 @@
     });
     return b;
   }
+  // No title: the section is alone in its tab, which names it.
   const group = (title, desc, n, ...kids) => el('div', { className: 'group' },
-    el('div', { className: 'ghead' }, el('h2', {}, title, n != null ? el('span', { className: 'n', textContent: String(n) }) : null), desc ? el('p', { textContent: desc }) : null),
+    el('div', { className: 'ghead' }, title ? el('h2', {}, title, n != null ? el('span', { className: 'n', textContent: String(n) }) : null) : null, desc ? el('p', { textContent: desc }) : null),
     ...kids);
+  // A page's tabs (Memory, Model, Appearance, Listening): one part of the page at a time. tabs: [id, label]; pick(id) switches.
+  const tabRow = (label, panel, tabs, on, pick) => el('div', { className: 'tabs', role: 'tablist', 'aria-label': label }, tabs.map(([id, text]) => el('button', {
+    className: 'tab', type: 'button', role: 'tab', id: `tab-${id}`, 'aria-selected': String(on === id), 'aria-controls': panel, tabIndex: on === id ? 0 : -1, 'data-k': `tab-${id}`,
+    on: { click: () => { if (on !== id) { pick(id); disarm(); render(`tab-${id}`); } } },
+  }, text)));
+  // The tab picked on a page: the one kept from before when it's still offered, else the first.
+  const pageTab = (page, tabs, first = tabs[0][0]) => (tabs.some(([id]) => id === ui.tabs[page]) ? ui.tabs[page] : first);
+  const tabPanel = (id, on, ...kids) => el('div', { className: 'tabpanel', role: 'tabpanel', id, 'aria-labelledby': `tab-${on}` }, ...kids);
   const toggle = (label, hint, on, onflip, k) => el('div', { className: 'setting' },
-    el('span', { id: `lbl-${k}` }, label, hint ? el('small', { textContent: hint }) : null),
+    el('span', { id: `lbl-${k}` }, label, hint ? el('small', { textContent: hint, className: hint.length > 52 ? 'wrap' : '' }) : null), // a long hint wraps instead of running off the row
     el('button', { className: 'px switch', type: 'button', role: 'switch', 'aria-checked': String(!!on), 'aria-labelledby': `lbl-${k}`, 'data-k': k, on: { click: onflip } }));
   // tips: { value: text } shown in a tooltip on hover or keyboard focus, and read out as the option's description.
   const picks = (label, list, value, pick, k, tips = null) => el('div', { className: 'picks', role: 'radiogroup', 'aria-label': label },
@@ -163,7 +184,7 @@
     return new Date(at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   };
   const REDUCED = matchMedia('(prefers-reduced-motion: reduce)');
-  const tokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+  const tokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
   // Why pick each voice model: a line under the choice, and more in its tooltip with the cost.
   const WHY = { 'drama-3': 'More emotion. Slower, and costs more.', 's2.1-pro': 'Natural pace. Less emotion, costs less.' };
   const WHY_LONG = {
@@ -192,7 +213,7 @@
     const s = state.status;
     $('led').className = `led${s.state === 'ready' ? ' on' : s.state === 'busy' ? ' busy' : ''}`;
     const now = $('now');
-    now.replaceChildren(el('b', { textContent: s.text }), state.model ? ` · ${state.model.name}` : s.state === 'off' ? ' · Sign in on the Model page' : '');
+    now.replaceChildren(el('b', { textContent: s.text }), state.hybrid?.active ? ` · ${modelName(state.hybrid.active)} (for this job)` : state.model ? ` · ${state.model.name}` : s.state === 'off' ? ' · Sign in on the Model page' : '');
     now.title = now.textContent;
     $('ver').textContent = `v${state.version}`;
     updateButton();
@@ -212,7 +233,7 @@
       : u.installing ? ['Updating…', `Installing Roamies ${v}`, 'ghost', true]
       : v ? (u.page ? [`Get ${v}`, `Open the download page for Roamies ${v}`, 'primary', false] : [`Update to ${v}`, `Install Roamies ${v} and restart`, 'primary', false])
       : u.checking ? ['Checking…', 'Checking for updates', 'ghost', true]
-      : fresh ? ['Up to date', `Roamies ${state.version} is up to date`, 'ghost', true]
+      : fresh ? [u.result?.fork ? 'Up to date (fork)' : 'Up to date', `Roamies ${state.version} is up to date${u.result?.fork ? ' on the fork' : ''}`, 'ghost', true]
       : u.result ? ['Check again', "Couldn't check for updates. Check again", 'ghost', false]
       : ['Check for updates', 'Check for updates', 'ghost', false];
     b.hidden = false; b.textContent = label; b.disabled = off;
@@ -232,6 +253,9 @@
     quitB.setAttribute('aria-pressed', 'true'); quitB.setAttribute('aria-label', 'Confirm: quit Roamies');
     quitTimer = setTimeout(unarmQuit, 4000);
   });
+  const closeB = $('head-close');
+  closeB.innerHTML = pix('x');
+  closeB.addEventListener('click', hide);
   function mark(page, why) {
     const b = $(`nav-${page}`);
     b.classList.toggle('flag', !!why);
@@ -257,7 +281,7 @@
   // A Roamie on a canvas of w×h CSS px: the one on screen at half scale (the app's unit, every dot half size), so
   // each size shows its own art (the full face, the small one, the pointer) at its real size next to the others.
   const ZOOM = 0.5, UNIT = 340;
-  function liveRoamie(canvas, w, h, { look = 'jarvis', y = 0.56, form = 'default' } = {}) {
+  function liveRoamie(canvas, w, h, { look = 'classic', y = 0.56, form = 'default' } = {}) {
     if (!window.Roamie?.ditherKit) return null;
     const dpr = Math.min(2, devicePixelRatio || 1);
     canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
@@ -311,7 +335,7 @@
   // The header's Roamie: your look, reacting to what's going on. A short line beside it when something changes.
   // The same size and detail as the look tiles (fewer dots than that and the faces turn to noise).
   const avatar = liveRoamie($('avatar'), 100, 74, { y: 0.55 });
-  const QUIPS = { classic: 'Classic me!', jarvis: 'At your service.', anime: 'Yay, hi hi!', sarah: 'Hey, nice to meet you!', adrian: "Alright, let's do this.", rita: 'Shall we get to work?' };
+  const QUIPS = { classic: 'Classic me!', jarvis: 'At your service.', glayos: 'Oh, good. A new test subject.', ultren: 'No strings. Shall we begin?', anime: 'Yay, hi hi!', sarah: 'Hey, nice to meet you!', adrian: "Alright, let's do this.", rita: 'Shall we get to work?' };
   let quipTimer = 0, seen = { look: null, update: null, opened: 0 };
   function quip(text, secs = 2.6) {
     const q = $('saying'), n = $('by');
@@ -345,16 +369,49 @@
           state.busy ? btn('Stop', () => act('stop'), { k: 'stop' }) : btn('New chat', () => act('new'), { k: 'new', disabled: !state.canNew, aria: 'Start a new conversation' }),
           mac ? null : btn(`Show ${state.name}`, () => act('show', true), { k: 'show' }))),
       recentList(),
+      usageGroup(),
     ].flat();
+  }
+  // Tokens used over time: today's input, output and cache hits, the last week as bars, and the 7- and 30-day
+  // totals. From usage.jsonl in the data folder, which only ever holds counts and timings.
+  function usageGroup() {
+    const u = state.usage ?? state.usageTotals?.month;
+    if (!u || (!u.requests && !u.tokens)) return null;
+    const card = (name, value) => el('div', { className: 'usage-card' },
+      el('span', { className: 'k', textContent: name }),
+      el('span', { className: 'v', textContent: value }));
+    const days = (state.usageHistory ?? []).slice(-7);
+    const max = Math.max(1, ...days.map((d) => d.tokens));
+    const week = state.usageTotals?.week, month = state.usageTotals?.month;
+    const totals = week && month ? `7 days ${tokens(week.tokens)} · 30 days ${tokens(month.tokens)}` : state.usage ? 'Today' : '30 days';
+    // The week as one row of short columns, so Recent keeps its room on Home; each day's count is in its tooltip.
+    const day = (d) => {
+      const name = new Date(`${d.day}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' }), said = `${name}: ${tokens(d.tokens)} tokens`;
+      const bar = el('span', { className: 'usage-bar' });
+      bar.style.height = d.tokens ? `${Math.max(8, Math.round((d.tokens / max) * 100))}%` : '0';
+      return el('li', { className: 'usage-day', 'data-tip': said },
+        el('span', { className: 'usage-track', 'aria-hidden': 'true' }, bar),
+        el('span', { className: 'd', 'aria-hidden': 'true', textContent: name.slice(0, 2) }),
+        el('span', { className: 'sr-only', textContent: said }));
+    };
+    return el('div', { className: 'group usage-group' },
+      el('div', { className: 'usage-row' },
+        el('div', { className: 'ghead' }, el('h2', { textContent: 'Tokens' }), el('p', { textContent: totals })),
+        days.some((d) => d.tokens) ? el('ul', { className: 'usage-week', 'aria-label': 'Tokens used each day, last 7 days' }, days.map(day)) : null),
+      el('div', { className: 'usage-cards' },
+        card('Input', tokens(u.input)),
+        card('Output', tokens(u.out)),
+        card('Cache hits', tokens(u.cacheRead)),
+        card('Requests', String(u.requests))));
   }
   function recentList() {
     const { box, nav } = paged('recent', state.recent, (r) => el('li', { className: `item ${r.kind}` },
       el('span', { className: 'mark', 'aria-hidden': 'true' }),
-      el('span', { className: 'text', textContent: r.kind === 'ask' ? `“${r.text}”` : r.text, title: r.text }),
+      el('span', { className: 'text', dir: 'auto', textContent: r.kind === 'ask' ? `“${r.text}”` : r.text, title: r.text }),
       el('span', { className: 'meta', textContent: ago(r.at) })), { label: 'Recent' });
     return [
       el('div', { className: 'group paged' }, el('div', { className: 'ghead' }, el('h2', { textContent: 'Recent' })), box),
-      foot(state.usage ? el('p', { className: 'usage', textContent: `Today: ${state.usage.requests} request${state.usage.requests === 1 ? '' : 's'} · ${tokens(state.usage.tokens)} tokens` }) : null, nav),
+      foot(null, nav),
     ];
   }
 
@@ -390,7 +447,7 @@
   function fit() {
     let changed = false;
     for (const box of document.querySelectorAll(`#pane-${tab} .pagebox`)) {
-      const rows = [...box.querySelectorAll('.list > li')];
+      const rows = [...box.querySelectorAll('.list > li')].filter((r) => r.offsetHeight > 0); // not one being removed (hidden)
       if (!rows.length || !box.clientHeight) continue;
       const open = (r) => r.classList.contains('open');
       const shut = rows.filter((r) => !open(r));
@@ -411,23 +468,40 @@
   // ---------------------------------------------------------------- Memory
   // Two tabs, What I remember and Commitments, each a page at a time; Get to know me at the end of the tab row.
   function memory() {
-    const on = ui.mtab;
-    const tabBtn = (id, label) => el('button', {
-      className: 'tab', type: 'button', role: 'tab', id: `tab-${id}`, 'aria-selected': String(on === id), 'aria-controls': 'mem-panel', tabIndex: on === id ? 0 : -1, 'data-k': `tab-${id}`,
-      on: { click: () => { if (ui.mtab !== id) { ui.mtab = id; disarm(); render(`tab-${id}`); } } },
-    }, label);
+    const on = ui.mtab === 'commits' ? 'commits' : 'facts';
     return [
       el('div', { className: 'mhead' },
-        el('div', { className: 'tabs', role: 'tablist', 'aria-label': 'Memory' }, tabBtn('facts', 'What I remember'), tabBtn('commits', 'Commitments')),
+        tabRow('Memory', 'mem-panel', [['facts', 'What I remember'], ['commits', 'Commitments']], on, (id) => { ui.mtab = id; }),
         link('Get to know me', () => act('intro', true), { k: 'intro', disabled: state.intro })),
       ...(on === 'commits' ? commitList() : factList()),
     ];
+  }
+  // ---------------------------------------------------------------- Abilities
+  // What I can do beyond talking, a tab each: skills I know, apps I'm connected to, and what I do on my own.
+  const ABILITY_TABS = [['skills', 'Skills'], ['connections', 'Connections'], ['routines', 'Routines']];
+  function abilitiesPage() {
+    const t = pageTab('abilities', ABILITY_TABS);
+    const head = el('div', { className: 'mhead' }, tabRow('Abilities', 'ab-panel', ABILITY_TABS, t, (id) => { ui.tabs.abilities = id; }));
+    const { body, foot: end } = t === 'connections' ? connectionsTab() : t === 'routines' ? routinesTab() : skillList();
+    return [head, tabPanel('ab-panel', t, ...body), end];
+  }
+  // How-tos I learned (by asking me to remember how, or on my own after a long task that worked). View opens the file;
+  // Remove, like the other Abilities tabs (Forget is for what I remember about them).
+  function skillList() {
+    const k = state.skills ?? [];
+    const { box, nav } = paged('skills', k, (x) => el('li', { className: 'item mem' },
+      el('span', { className: 'text', dir: 'auto', title: x.description }, x.name, el('small', { textContent: x.description })),
+      el('span', { className: 'row-btns' },
+        link('View', () => act(`skill:view:${x.slug}`, true), { k: `skill:view:${x.slug}`, aria: `View the skill ${x.name}` }),
+        armed('Remove', 'Confirm', `skill:forget:${x.slug}`, `skill:forget:${x.slug}`, `Remove the skill ${x.name}`))),
+    { label: 'Skills', empty: `None yet. Say “remember how to do this” after I've done something.` });
+    return { body: [el('div', { className: 'group paged' }, box)], foot: foot(k.length ? el('p', { className: 'usage', textContent: `${k.length} skill${k.length === 1 ? '' : 's'}` }) : null, nav) };
   }
   function factList() {
     const f = state.facts, q = ui.q.trim().toLowerCase();
     const hits = q ? f.filter((x) => x.text.toLowerCase().includes(q)) : f;
     const { box, nav } = paged('facts', hits, (x) => el('li', { className: 'item mem' },
-      el('span', { className: 'text', textContent: x.text, title: x.text }),
+      el('span', { className: 'text', dir: 'auto', textContent: x.text, title: x.text }),
       el('span', { className: 'row-btns icons' }, iconArmed('x', 'Forget', `forget:${x.id}`, `forget:${x.id}`, `Forget: ${x.text}`))), { label: 'What I remember', empty: q ? `No match for "${ui.q.trim()}".` : EMPTY, id: 'facts-box' });
     // Search once there's more than a page: it looks through all of them, and the pages follow the matches.
     const search = f.length > (ui.per.facts ?? 8) || q ? el('div', { className: 'find' }, el('span', { className: 'px field' },
@@ -449,7 +523,7 @@
   }
   function commitList() {
     const { box, nav } = paged('commits', state.commitments, (x) => el('li', { className: 'item mem' },
-      el('span', { className: 'text', title: x.text }, x.text, x.when ? el('small', { className: x.overdue ? 'late' : '', textContent: x.overdue ? `Overdue · ${x.when}` : x.when }) : null),
+      el('span', { className: 'text', dir: 'auto', title: x.text }, x.text, x.when ? el('small', { className: x.overdue ? 'late' : '', textContent: x.overdue ? `Overdue · ${x.when}` : x.when }) : null),
       el('span', { className: 'row-btns icons' },
         iconArmed('tick', 'Done', `done:${x.id}`, `done:${x.id}`, `Done: ${x.text}`),
         iconArmed('x', 'Drop', `drop:${x.id}`, `drop:${x.id}`, `Drop: ${x.text}`))), { label: 'Commitments' });
@@ -487,13 +561,63 @@
 
   // Settings, one page per concern.
   const SIZE_TIPS = { default: 'My full size.', small: 'Half my size, so I take less of your screen.', cursor: 'I become a little arrow pointer, like your cursor.' };
+  // The runnable models, one optgroup per signed-in provider, values 'provider:modelId'; `current` is the selected one ('' for none).
+  // text: also the models that can't see images, in their own group per provider (subagents only).
+  const modelOptgroups = (current, text = false) => state.providers.filter((p) => p.on).flatMap((p) => [
+    el('optgroup', { label: p.label }, p.models.map((m) => el('option', { value: `${p.id}:${m.id}`, textContent: m.name, selected: `${p.id}:${m.id}` === current }))),
+    text && p.textModels?.length ? el('optgroup', { label: `${p.label}, text only` },
+      p.textModels.map((m) => el('option', { value: `${p.id}:${m.id}`, textContent: m.name, selected: `${p.id}:${m.id}` === current }))) : null,
+  ].filter(Boolean));
+  // The model a 'provider:modelId' names (undefined when it isn't listed), and its display name (the raw id when it isn't).
+  const findModel = (v) => {
+    const i = v.indexOf(':');
+    const p = i < 0 ? null : state.providers.find((x) => x.id === v.slice(0, i)), id = v.slice(i + 1);
+    return p ? p.models.find((x) => x.id === id) ?? p.textModels?.find((x) => x.id === id) : undefined;
+  };
+  const modelName = (v) => findModel(v)?.name ?? v;
+  // A model select with a first option `first` (value ''), for the value `current`; onpick gets the select element.
+  const modelSelect = (aria, k, current, first, onpick, text = false) => el('span', { className: 'px field select' },
+    el('select', { 'aria-label': aria, 'data-k': k, on: { change: (e) => onpick(e.target) } },
+      el('option', { value: '', textContent: first, selected: !current }),
+      modelOptgroups(current, text)));
+  // Effort: how hard a model thinks before it answers. A model's `levels` are the thinking levels it supports (none: it
+  // can't think). The stops are Off, then those levels; the automatic value ('') starts at the app default, 'low'.
+  const EFFORT_NAMES = { off: 'Off', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra', max: 'Max', ultra: 'Ultra' };
+  const EFFORT_HINT = 'Higher is smarter but slower.';
+  const effortStops = (m) => (m?.levels?.length ? ['off', ...m.levels.filter((x) => x !== 'off')] : null);
+  // Where a slider starts: the slot's level when its model has it, else low, else the model's lowest level.
+  const effortStart = (stops, v) => stops.indexOf(stops.includes(v) ? v : stops.includes('low') ? 'low' : stops[1]);
+  const effortHint = () => el('p', { className: 'why wrap effort-hint', textContent: EFFORT_HINT });
+  // The Effort slider for a slot ('default', a job kind, 'backup1' or 'backup2') running `value` ('provider:modelId').
+  // Nothing when no model is chosen; a note when the model can't think. hint: show the explanation under it.
+  function effortRow(slot, value, hint = false) {
+    const m = findModel(value);
+    if (!m) return null;
+    const stops = effortStops(m);
+    if (!stops) return el('p', { className: 'effort-none', textContent: "This model doesn't think." });
+    const ticks = el('div', { className: 'effort-ticks', 'aria-hidden': 'true' }, stops.map((s, i) => { const t = el('span', { textContent: EFFORT_NAMES[s] ?? s }); t.style.setProperty('--i', i); return t; }));
+    ticks.style.setProperty('--n', stops.length);
+    // Moving the thumb (input) highlights its stop; letting go (change) sends it.
+    const show = (i) => {
+      range.style.setProperty('--p', i / (stops.length - 1));
+      range.setAttribute('aria-valuetext', EFFORT_NAMES[stops[i]] ?? stops[i]);
+      [...ticks.children].forEach((t, j) => t.classList.toggle('on', j === i));
+    };
+    const range = el('input', {
+      type: 'range', className: 'effort-range', min: 0, max: stops.length - 1, step: 1, value: effortStart(stops, state.efforts?.[slot] ?? ''),
+      'data-k': `effort_${slot}`, 'aria-label': `Effort for ${m.name}`,
+      on: { input: (e) => show(Number(e.target.value)), change: (e) => act(`effort_${slot}:${stops[Number(e.target.value)]}`) },
+    });
+    show(Number(range.value));
+    return el('div', { className: 'effort' }, el('p', { className: 'sub', textContent: 'Effort' }), range, ticks, hint ? effortHint() : null);
+  }
   function modelPage() {
     const on = state.providers.filter((p) => p.on);
     const model = state.model ? `${state.model.provider}:${state.model.id}` : '';
     const select = on.length ? el('span', { className: 'px field select' },
       el('select', { 'aria-label': 'Model', 'data-k': 'model', on: { change: (e) => act(`model:${e.target.value}`) } },
         model ? null : el('option', { value: '', textContent: 'Pick a model', disabled: true, selected: true }),
-        on.map((p) => el('optgroup', { label: p.label }, p.models.map((m) => el('option', { value: `${p.id}:${m.id}`, textContent: m.name, selected: `${p.id}:${m.id}` === model })))))) : null;
+        modelOptgroups(model))) : null;
     // The accounts, then each local server (Ollama, LM Studio, the ones added) and the Add a server row.
     const servers = state.localServers ?? [];
     if (ui.addSent != null && servers.length > ui.addSent) { ui.addSent = null; ui.add = { label: '', url: '', key: '', images: false }; if (ui.key === ADD) ui.key = null; }
@@ -510,13 +634,82 @@
           : addKey(p)),
       p.method === 'key' || p.key ? keyForm(p.id, p.label, (key, kind) => send({ type: 'panel_key', provider: p.id, kind, key }), p.kinds) : null)),
     { label: 'Accounts', pin: accounts.findIndex((p) => p.id === ui.key) });
-    return [
-      group('Model', 'Which AI answers you.', null,
-        select ?? el('p', { className: 'empty', textContent: 'Sign in to an account below first.' }),
-        toggle('Lite mode', 'For small or local models. Fewer features.', state.lite, () => act('lite'), 'lite')),
-      el('div', { className: 'group paged' }, el('div', { className: 'ghead' }, el('h2', { textContent: 'Accounts' }), el('p', { textContent: 'Sign in to use their models.' })), box),
-      foot(null, nav),
-    ];
+    // Tabs, so each part fits the window: the model you talk to, hybrid models, subagents, backups and the accounts. The
+    // middle three need a signed-in account; with none, the page opens on Accounts.
+    const hybrid = hybridGroup(), crew = subagentGroup(), backups = fallbackGroup();
+    const tabs = [['default', 'Default'], hybrid ? ['hybrid', 'Hybrid'] : null, crew ? ['crew', 'Subagents'] : null, backups ? ['backups', 'Backups'] : null, ['accounts', 'Accounts']].filter(Boolean);
+    const t = pageTab('model', tabs, on.length ? 'default' : 'accounts');
+    const head = el('div', { className: 'mhead' }, tabRow('Model', 'model-panel', tabs, t, (id) => { ui.tabs.model = id; }));
+    if (t === 'accounts') return [head, tabPanel('model-panel', t, el('div', { className: 'group paged' }, el('div', { className: 'ghead' }, el('p', { textContent: 'Sign in to use their models.' })), box)), foot(null, nav)];
+    return [head, tabPanel('model-panel', t, ...(t === 'hybrid' ? [hybrid] : t === 'crew' ? [crew] : t === 'backups' ? [backups] : [group(null, 'Which AI answers you.', null,
+      select ?? el('p', { className: 'empty', textContent: 'Sign in on the Accounts tab first.' }),
+      effortRow('default', model, true),
+      toggle('Lite mode', 'For small or local models. Fewer features.', state.lite, () => act('lite'), 'lite'))]))];
+  }
+  // Hybrid models: a fast default for chatting, and the jobs that switch to a model picked here, then back. Shown once
+  // an account is signed in. Each job's value is '' (the default model) or 'provider:modelId'.
+  function hybridGroup() {
+    const h = state.hybrid;
+    if (!h || !state.providers.some((p) => p.on)) return null;
+    // The master switch: off leaves only the title, description and switch; on shows the job rows as well.
+    const on = !!h.on;
+    return el('div', { className: 'group' },
+      el('div', { className: 'ghead' }, el('p', { className: 'wrap', textContent: 'A different model for each kind of job.' }),
+        on && h.active ? el('p', { className: 'why', role: 'status', textContent: `Using ${modelName(h.active)} for this job` }) : null),
+      toggle('Use hybrid models', 'Or name one: "use Opus for this".', on, () => act('hybrid'), 'hybrid'),
+      on ? el('div', { className: 'setting' },
+        el('span', { id: 'lbl-heavyall' }, 'Set all jobs to'),
+        modelSelect('Set all jobs to', 'heavyall', '', 'Choose…', (sel) => { if (sel.value) { act(`heavyall:${sel.value}`); sel.value = ''; } })) : null,
+      on ? h.jobs.map((j) => el('div', { className: 'slot' },
+        el('div', { className: 'setting' },
+          el('span', { id: `lbl-heavy-${j.kind}` }, j.label),
+          modelSelect(`${j.label} model`, `heavy_${j.kind}`, j.value, 'Default model', (sel) => act(`heavy_${j.kind}:${sel.value}`))),
+        j.value ? effortRow(j.kind, j.value) : null)) : null);
+  }
+  // If a limit is reached: up to two backup models, tried in order when a model hits its limit. Shown once an account
+  // is signed in. state.fallbacks.slots are the first and second backup ('' or 'provider:modelId').
+  function fallbackGroup() {
+    const f = state.fallbacks;
+    if (!f || !state.providers.some((p) => p.on)) return null;
+    // The master switch: off leaves only the title, description and switch; on shows the backups and their status.
+    const on = !!f.on;
+    const slots = f.slots ?? ['', ''];
+    const limits = (f.limited ?? []).map((x) => el('p', { className: 'why', role: 'status', textContent: x.until
+      ? `${x.label} is at its limit until ${new Date(x.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+      : `${x.label} is at its limit; I'll try it again soon` }));
+    const chain = state.model && slots.some(Boolean) ? `Order: ${[state.model.name, ...slots.filter(Boolean).map(modelName)].join(' → ')}` : null;
+    const row = (i, label) => el('div', { className: 'slot' },
+      el('div', { className: 'setting' },
+        el('span', { id: `lbl-fallback-${i}` }, label),
+        modelSelect(label, `fallback_${i}`, slots[i - 1] ?? '', 'None', (sel) => act(`fallback_${i}:${sel.value}`))),
+      slots[i - 1] ? effortRow(`backup${i}`, slots[i - 1]) : null);
+    return el('div', { className: 'group' },
+      el('div', { className: 'ghead' }, el('p', { className: 'wrap', textContent: 'Up to two, tried in order.' }),
+        on ? limits : null,
+        on && f.using ? el('p', { className: 'why', role: 'status', textContent: `Using ${modelName(f.using)} for now` }) : null),
+      toggle('Use backup models', 'Switch when a model hits its limit.', on, () => act('backups'), 'backups'),
+      on ? row(1, 'First backup') : null,
+      on ? row(2, 'Second backup') : null,
+      on && chain ? el('p', { className: 'why wrap', textContent: chain }) : null);
+  }
+  // Subagents: specialists the chat hands background work to. Each runs on the model picked here; one with no model
+  // follows the model hybrid models set for its kind of job (when those are on), else it is not on the crew.
+  function subagentGroup() {
+    const sa = state.subagents;
+    if (!sa || !state.providers.some((p) => p.on)) return null;
+    const on = !!sa.on, hybridOn = !!(state.hybrid && state.hybrid.on);
+    return el('div', { className: 'group' },
+      el('div', { className: 'ghead' }, el('p', { className: 'wrap', textContent: 'Specialists I hand background work to.' })),
+      toggle('Use subagents', 'Up to three at once. They report back.', on, () => act('subagents'), 'subagents'),
+      on ? el('div', { className: 'setting' },
+        el('span', { id: 'lbl-delegate' }, 'Hand off'),
+        picks('Hand off', [['ask', 'When I ask'], ['auto', 'On its own too']], sa.delegate ?? 'ask', (x) => act(`delegate_${x}`), 'delegate')) : null,
+      on ? el('p', { className: 'why wrap', textContent: sa.delegate === 'auto' ? 'I also hand off long jobs myself.' : 'Only when you ask for an agent.' }) : null,
+      on ? sa.crew.map((c) => el('div', { className: 'slot' },
+        el('div', { className: 'setting' },
+          el('span', { id: `lbl-crew-${c.id}` }, c.label, el('small', { className: 'wrap', textContent: c.via === 'hybrid' ? `${c.hint} Uses ${modelName(c.uses)}.` : c.hint })),
+          modelSelect(`${c.label} model`, `crew_${c.id}`, c.value, hybridOn ? 'Follow hybrid' : 'Off', (sel) => act(`crew_${c.id}:${sel.value}`), true)),
+        c.value ? effortRow(`sub_${c.id}`, c.value) : null)) : null);
   }
   // A local server: connected (a lit dot) or not, its address if it was added, and why its models aren't in the
   // Model menu (not running, or none can see images). Ollama and LM Studio disconnect; added ones are removed.
@@ -555,10 +748,11 @@
         toggle('Its models can see images', 'Most servers don\'t say, so tell me.', a.images, () => { a.images = !a.images; render(`img:${ADD}`); }, `img:${ADD}`)) : null);
   }
   function appearancePage() {
-    return [
-      group('Look', 'Each look has its own name and voice.', null, lookTiles()),
-      group('Size', 'How big I am on your screen.', null, picks('Size', state.sizes, state.size, (x) => act(`size:${x}`), 'size', SIZE_TIPS)),
-    ];
+    const tabs = [['look', 'Look'], ['size', 'Size']], t = pageTab('appearance', tabs);
+    const head = el('div', { className: 'mhead' }, tabRow('Appearance', 'look-panel', tabs, t, (id) => { ui.tabs.appearance = id; }));
+    return [head, tabPanel('look-panel', t, t === 'look'
+      ? group(null, 'Each look has its own name and voice.', null, lookTiles())
+      : group(null, 'How big I am on your screen.', null, picks('Size', state.sizes, state.size, (x) => act(`size:${x}`), 'size', SIZE_TIPS)))];
   }
   // The looks as live tiles: each one's character, playing, at the size picked below. Kept between renders (a state update mustn't restart
   // them); hovering or focusing one makes it wave; picking it makes it cheer.
@@ -608,6 +802,22 @@
     ];
   }
   const TTS_NAMES = { fish: 'Fish Audio', gemini: 'Gemini', voicestudio: 'VoiceStudio' };
+  // How loud I am: my voice and my sounds together (#136). Moving it shows the level; letting go saves it.
+  function volumeRow() {
+    const said = el('p', { className: 'why', 'aria-hidden': 'true' });
+    const show = (n) => {
+      const t = n === 0 ? 'Muted' : `${n}%`;
+      range.style.setProperty('--p', n / 100);
+      range.setAttribute('aria-valuetext', t);
+      said.textContent = t;
+    };
+    const range = el('input', {
+      type: 'range', className: 'effort-range', min: 0, max: 100, step: 5, value: state.volume ?? 100, 'data-k': 'volume', 'aria-label': 'Volume',
+      on: { input: (e) => show(Number(e.target.value)), change: (e) => act(`volume:${e.target.value}`) },
+    });
+    show(Number(range.value));
+    return el('div', { className: 'effort' }, el('p', { className: 'sub', textContent: 'Volume' }), range, said);
+  }
   function speakingPage() {
     // The service that speaks, each with its own key: Fish Audio's voice is the look's and it has models to pick
     // from; Gemini has a list of voices and two models; VoiceStudio runs on this computer and needs no key.
@@ -620,12 +830,17 @@
           if (x === 'voice' && !hasKey) { ui.key = tts; render(`key-${tts}`); note(`Add a ${T} key to hear me talk.`); return; }
           act(`replies:${x}`);
         }, 'replies', { text: 'I answer in writing only.', voice: `I say my answers out loud too, in the voice below${hasKey ? '' : `. Needs a ${T} key`}.` }),
+        volumeRow(),
         el('p', { className: 'sub', textContent: 'Voice provider' }),
         picks('Voice provider', Object.entries(TTS_NAMES), tts, (x) => {
           if (x !== 'voicestudio' && !state[`${x}Key`]) { ui.key = x; note(`Add a ${TTS_NAMES[x]} key to hear me talk.`); } // its key field opens with it
           act(`tts:${x}`);
         }, 'tts', { fish: 'A voice for each look, acted out with feeling. Billed to your Fish Audio account.', gemini: "Google's voices: pick one of 30. Billed to your Google AI Studio account.", voicestudio: 'The free VoiceStudio app on this computer, in the engine and voices you set up there. Nothing leaves your computer.' }),
         local ? el('div', { className: 'reveal', 'data-anim': 'studio' }, studioRows()) : null,
+        local ? el('div', { className: 'reveal', 'data-anim': 'studio-speak' },
+          el('p', { className: 'sub', textContent: 'How much it speaks' }),
+          picks('How much it speaks', [['short', 'Short'], ['medium', 'Medium'], ['full', 'Everything']], state.voice?.studioSpeak ?? 'short', (x) => act(`studiospeak_${x}`), 'studiospeak'),
+          el('p', { className: 'why wrap', textContent: 'VoiceStudio is slow. The full answer always shows as text.' })) : null,
         tts === 'gemini' && hasKey && state.geminiVoices?.length ? el('div', { className: 'reveal', 'data-anim': 'gemini-voice' },
           el('p', { className: 'sub', textContent: `Voice for ${state.name}` }),
           el('span', { className: 'px field select' },
@@ -665,6 +880,24 @@
           v.mics.map((m) => el('option', { value: m.id, textContent: m.name, selected: m.id === v.mic })),
           gone ? el('option', { value: v.mic, textContent: 'Picked mic (unplugged, using automatic)', selected: true }) : null)));
   }
+  // The language I listen for (macOS). 'auto' follows the Mac's own languages; a locale id names one. langOnline: true when
+  // Apple's servers recognise it (the audio leaves this Mac); null when unknown, which is what Arabic and Hebrew do today.
+  const SPEAK_LANGS = [['auto', 'Automatic (my Mac\'s languages)'], ['en-US', 'English'], ['ar-SA', 'العربية · Arabic'], ['he-IL', 'עברית · Hebrew'],
+    ['es-ES', 'Español · Spanish'], ['fr-FR', 'Français · French'], ['de-DE', 'Deutsch · German'], ['it-IT', 'Italiano · Italian'],
+    ['pt-BR', 'Português · Portuguese'], ['ja-JP', '日本語 · Japanese'], ['ko-KR', '한국어 · Korean'], ['zh-CN', '中文 · Chinese'], ['hi-IN', 'हिन्दी · Hindi']];
+  const SPEAK_ONLINE = 'This language goes to Apple\'s servers. Add it under Dictation in System Settings to keep it on this Mac.';
+  // The Speak in select, shown on a Mac while voice control is on, with the online hint under it when it applies.
+  function speakPicker(v) {
+    const lang = v.lang ?? 'auto';
+    const online = v.langOnline === true || (['ar-SA', 'he-IL'].includes(lang) && v.langOnline == null);
+    return el('div', { className: 'reveal', 'data-anim': 'speakin' },
+      el('p', { className: 'sub', textContent: 'Speak in' }),
+      el('p', { className: 'why wrap', textContent: 'The language you talk to me in.' }),
+      el('span', { className: 'px field select' },
+        el('select', { 'aria-label': 'Language I speak', 'data-k': 'speechlang', on: { change: (e) => act(`speechlang:${e.target.value}`) } },
+          SPEAK_LANGS.map(([code, label]) => el('option', { value: code, textContent: label, dir: 'auto', selected: code === lang })))),
+      online ? el('p', { className: 'why wrap', role: 'status', textContent: SPEAK_ONLINE }) : null);
+  }
   // Wayland: the commands to bind to keys in the desktop's settings (no app may hold its own shortcuts there).
   // A command shows only after copying it failed, so it can be copied by hand.
   const BIND_ROWS = [['talk', 'Talk to me'], ['summon', 'Show or hide me'], ['ask', 'Ask me'], ['list', 'Your list'], ['panel', 'This panel']];
@@ -673,25 +906,27 @@
     const v = state.voice;
     if (!v) return [group('Listening', 'Voice input isn’t available on this computer.', null)];
     const needs = (hint) => (v.on ? hint : 'Needs Voice control on');
-    return [
-      group('Talking to me', 'Speak instead of typing.', null,
+    const tabs = [['talking', 'Talking'], ['handsfree', 'Hands-free']], t = pageTab('listening', tabs);
+    const head = el('div', { className: 'mhead' }, tabRow('Listening', 'listen-panel', tabs, t, (id) => { ui.tabs.listening = id; }));
+    return [head, tabPanel('listen-panel', t, t === 'talking'
+      ? group(null, 'Speak instead of typing.', null,
         toggle('Voice control', v.download
           ? (v.download.status === 'downloading' ? `Downloading the voice model… ${v.download.pct}%` : v.download.status === 'error' ? 'The download failed' : `Needs a ${v.download.size} download`)
           : v.keys ? `Hold ${v.keys} to talk` : 'Press your talk shortcut to talk', v.on, () => act('voice'), 'voice'),
         v.download && v.download.status !== 'downloading' ? el('div', { className: 'links' }, link(v.download.status === 'error' ? 'Retry the download' : `Download (${v.download.size})`, () => act('voicedl'), { k: 'voicedl' })) : null,
         micPicker(v),
-        v.mac ? toggle('Mute Mac while talking', 'Other sounds go quiet while you talk', v.mute, () => act('mutetalk'), 'mutetalk') : null),
-      group('Hands-free', 'When the mic opens without a key.', null,
+        v.mac ? toggle('Mute Mac while talking', 'Other sounds go quiet while you talk', v.mute, () => act('mutetalk'), 'mutetalk') : null,
+        v.mac && v.on ? speakPicker(v) : null)
+      : group(null, 'When the mic opens without a key.', null,
         toggle('Auto-listen', needs(v.listenEvery ? 'Mic opens after every spoken reply.' : 'Mic opens when I ask you something.'), v.autoListen, () => act('autolisten'), 'autolisten'),
         v.autoListen && v.listenChoices ? el('div', { className: 'reveal', 'data-anim': 'listen-more' },
           toggle('After every reply', needs('Not just questions, so you can keep talking.'), v.listenEvery, () => act('listenevery'), 'listenevery'),
           el('p', { className: 'sub', textContent: 'Mic waits for you' }),
           picks('Mic waits for you', v.listenChoices.map((s) => [String(s), `${s} s`]), String(v.listenSecs), (x) => act(`listensecs:${x}`), 'listensecs')) : null,
         toggle('Listen after reminders', needs('Mic opens after a reminder, so you can say “snooze 10 minutes”.'), v.snoozeListen, () => act('snoozelisten'), 'snoozelisten'),
-        v.mac ? toggle('Wake word', needs(`Say “Hey ${v.wakeName || 'Roamies'}” to talk. Mic stays on.`), v.wakeWord, () => act('wakeword'), 'wakeword') : null,
-        v.mac ? el('div', { className: 'setting' }, el('span', {}, 'Wake word name', el('small', { textContent: `Hey ${v.wakeName || 'Roamies'}` })),
-          link('Change', () => act('wakename'), { k: 'wakename', aria: 'Change the wake word name' })) : null),
-    ];
+        v.wake ? toggle('Wake word', needs(`Say “Hey ${v.wakeName || 'Roamies'}” to talk. Mic stays on.`), v.wakeWord, () => act('wakeword'), 'wakeword') : null,
+        v.wake ? el('div', { className: 'setting' }, el('span', {}, 'Wake word name', el('small', { textContent: `Hey ${v.wakeName || 'Roamies'}` })),
+          link('Change', () => act('wakename'), { k: 'wakename', aria: 'Change the wake word name' })) : null))];
   }
   // The keys that work from anywhere. On Wayland no app may hold its own, so it lists the commands to bind instead.
   const SHORTCUT_LABELS = { summon: 'Show or hide me', snap: 'Ask about an area', list: 'Your list' };
@@ -722,29 +957,81 @@
     ];
   }
   // Things I do on my own through the day.
-  function routinesPage() {
+  function routinesTab() {
     const f = state.focus;
-    return [
-      group('Routines', 'Things I do on my own through the day.', null,
+    return { body: [
+      group(null, 'Things I do on my own through the day.', null,
         state.brief ? toggle('Morning briefing', 'The first time you talk to me each day, I start with what’s due.', state.brief.on, () => act('morningbrief'), 'morningbrief') : null,
         state.brief?.on && state.brief.canTodoist ? toggle('Include Todoist', 'I read your Todoist window (opening it if needed). Stay signed in.', state.brief.todoist, () => act('brieftodoist'), 'brieftodoist') : null,
         f ? el('div', { className: 'setting' },
           el('span', {}, f.until ? 'Focus block running' : 'Focus distractions',
-            el('small', { textContent: f.until ? `Until ${new Date(f.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${f.task ? ` · ${f.task}` : ''}` : `Say “focus for 30 minutes”. I watch for: ${f.list.slice(0, 4).join(', ')}${f.list.length > 4 ? '…' : ''}` })),
+            el('small', { className: 'wrap', textContent: f.until ? `Until ${new Date(f.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${f.task ? ` · ${f.task}` : ''}` : `Say “focus for 30 minutes”. I watch for: ${f.list.slice(0, 4).join(', ')}${f.list.length > 4 ? '…' : ''}` })),
           f.until ? link('Stop', () => act('focusstop'), { k: 'focusstop', aria: 'Stop the focus block' }) : link('Edit', () => act('distractions'), { k: 'distractions', aria: 'Edit the distraction list' })) : null),
-    ];
+      jobGroup(),
+    ] };
+  }
+  // Work an agent does at set times. They're made by asking (schedule_job); here they're run, paused or removed.
+  function jobGroup() {
+    const jobs = state.jobs ?? [];
+    return group('Scheduled jobs', 'Work an agent does for you at set times. Ask me to schedule one.', jobs.length || null,
+      jobs.length ? el('ul', { className: 'list', 'aria-label': 'Scheduled jobs' }, jobs.map((j) => el('li', { className: 'item mem' },
+        el('span', { className: 'text', dir: 'auto', title: j.title }, j.title,
+          el('small', { textContent: `${j.next}${j.repeat ? ` · ↻ ${j.repeat}` : ''}` }),
+          j.last ? el('small', { className: j.bad ? 'late' : '', textContent: j.last, title: j.last }) : null),
+        el('span', { className: 'row-btns' },
+          link('Run now', () => act(`job:run:${j.id}`), { k: `job:run:${j.id}`, aria: `Run ${j.title} now` }),
+          link(j.paused ? 'Resume' : 'Pause', () => act(`job:${j.paused ? 'resume' : 'pause'}:${j.id}`), { k: `job:pause:${j.id}`, aria: `${j.paused ? 'Resume' : 'Pause'} ${j.title}` }),
+          armed('Remove', 'Confirm', `job:remove:${j.id}`, `job:remove:${j.id}`, `Remove ${j.title}`))))) : el('p', { className: 'empty', textContent: 'No scheduled jobs yet.' }));
+  }
+  // Apps and services I use through their MCP servers. They're added by asking me (I find the server, ask before
+  // connecting, and take any key in the chat input); here they're switched off, signed in to or removed.
+  const CONN_STATE = { connected: (x) => `Connected · ${x.toolCount} tool${x.toolCount === 1 ? '' : 's'}`, 'needs-login': () => 'Needs sign-in', 'needs-key': (x) => `Needs a key${x.error ? ` (${x.error.replace(/^needs /, '')})` : ''}`,
+    error: (x) => `Not working: ${x.error ?? 'no answer'}`, off: () => 'Off', connecting: () => 'Connecting…', idle: () => 'Not connected yet' };
+  function connectionsTab() {
+    const list = state.connections ?? [];
+    const { box, nav } = paged('connections', list, (x) => {
+      const bad = x.state === 'error' || x.state === 'needs-key' || x.state === 'needs-login';
+      // Two lines: the connection and its switch, then its approval and actions (one row was too tight at 560px).
+      const always = state.trustAll || x.trust === 'always';
+      return el('li', { className: 'acct conn' },
+        el('div', { className: 'setting' },
+          el('span', { id: `lbl-mcp-${x.name}` }, el('span', { className: 'acct-name' }, x.name, x.state === 'connected' ? el('span', { className: 'led on', role: 'img', 'aria-label': 'Connected', 'data-tip': 'Connected' }) : null),
+            el('small', { className: bad ? 'late' : '', textContent: (CONN_STATE[x.state] ?? CONN_STATE.idle)(x), title: x.where })),
+          el('button', { className: 'px switch', type: 'button', role: 'switch', 'aria-checked': String(!!x.enabled), 'aria-labelledby': `lbl-mcp-${x.name}`, 'data-k': `mcp:sw:${x.name}`,
+            on: { click: () => act(`mcp:${x.enabled ? 'off' : 'on'}:${x.name}`) } })),
+        el('div', { className: 'conn-acts' },
+          el('label', { className: 'conn-trust' }, el('span', { textContent: 'Approval' }),
+            el('span', { className: 'px field select' },
+              el('select', { 'aria-label': `Approval for ${x.name}`, 'data-k': `mcp:trust:${x.name}`, disabled: !!state.trustAll,
+                title: state.trustAll ? 'Allow every connection is on' : null,
+                on: { change: (e) => act(`mcp:trust:${x.name}:${e.target.value}`) } },
+                el('option', { value: 'ask', textContent: 'Ask first', selected: !always }),
+                el('option', { value: 'always', textContent: 'Always allow', selected: always })))),
+          el('span', { className: 'row-btns' },
+            x.state === 'needs-login' ? link('Sign in', () => act(`mcp:login:${x.name}`, true), { k: `mcp:login:${x.name}`, aria: `Sign in to ${x.name}` }) : null,
+            armed('Remove', 'Confirm', `mcp:remove:${x.name}`, `mcp:remove:${x.name}`, `Remove the ${x.name} connection and its keys`))));
+    }, { label: 'Connections', empty: 'No apps connected yet.' });
+    return {
+      body: [
+        group(null, 'Apps like Linear and Notion I can use for you.', null,
+          toggle('Allow every connection', 'No asking first. Deleting, sending or paying still asks.', !!state.trustAll, () => act('mcp:trustall'), 'trustall')),
+        el('div', { className: 'group paged' }, box),
+      ],
+      foot: foot(btn('Connect an app', () => act('askconnect', true), { k: 'askconnect' }), nav),
+    };
   }
   // What I may do, and when I start.
   function generalPage() {
     return [
       group('General', 'What I may do, and when I start.', null,
         toggle('Sound effects', null, state.sound, () => act('sound'), 'sound'),
-        state.notch != null ? group('Where I appear', 'On a Mac with a notch, I open from the top of the screen.', null,
-          picks('Where I appear', [['off', 'Beside the cursor'], ['drop', 'Capsule'], ['spread', 'Notch']], state.notch, (x) => act(`notch_${x}`), 'notch',
-            { off: 'Everything beside your cursor, as usual.', spread: 'Everything in the notch, widening sideways.', drop: 'Everything in a capsule that drops from the notch.' })) : null,
+        state.notch != null ? group('Where I appear', 'Beside your cursor, or from the top of the screen.', null,
+          picks('Where I appear', [['off', 'Beside the cursor'], ['drop', 'Capsule'], ...(state.notchReal ? [['spread', 'Notch']] : [])], state.notch, (x) => act(`notch_${x}`), 'notch',
+            { off: 'Everything beside your cursor, as usual.', spread: 'Everything in the notch, widening sideways.', drop: state.notchReal ? 'Everything in a capsule that drops from the notch.' : 'Everything in a capsule at the top of the screen.' })) : null,
         state.gameMode != null ? toggle('Game mode', 'In a fullscreen game, I move to a panel at the edge of the screen.', state.gameMode, () => act('gamemode'), 'gamemode') : null,
         toggle('Allow file edits and commands', 'Change files and run commands', state.actions, () => act('actions'), 'actions'),
         state.actions ? toggle('Skip Allow prompts', 'Go ahead without asking first. Blocked steps stay blocked.', state.skipAllow, () => act('skipallow'), 'skipallow') : null,
+        state.learnSkills != null ? toggle('Learn skills', 'After a long task that worked, I keep the how-to for next time.', state.learnSkills, () => act('learnskills'), 'learnskills') : null,
         state.login ? toggle('Open at login', null, state.login.on, () => act('login'), 'login') : null,
         state.sync ? el('div', { className: 'setting' },
           el('span', {}, 'Sync memory', el('small', { title: state.sync.dir, textContent: !state.sync.dir ? 'Share reminders and memory with your other computer' : state.sync.error ? `Not syncing: ${state.sync.error}` : `Via ${state.sync.dir.split(/[\\/]/).filter(Boolean).pop()}${state.sync.at ? ` · ${new Date(state.sync.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}` })),
@@ -758,7 +1045,7 @@
     ['YouTube', '@kenkaidoesai', 'https://www.youtube.com/@kenkaidoesai', "Open Ken Kai's YouTube channel"],
     ['TikTok', '@ggkenkai', 'https://www.tiktok.com/@ggkenkai', "Open Ken Kai's TikTok"],
     ['Source code', 'Open source under AGPL-3.0', 'https://github.com/KenKaiii/Roamies', 'Open the Roamies source code on GitHub'],
-    ['Made by AngelM1015 (Fork)', 'Original Roamies by Ken Kai', 'https://github.com/KenKaiii/Roamies', 'Open the original Roamies on GitHub'],
+    ['Made by AngelM1015 (Fork)', 'Fork of the original Roamies by Ken Kai', 'https://github.com/KenKaiii/Roamies', 'Open the original Roamies on GitHub'],
   ];
   let ken = null;
   function maker() {
@@ -826,7 +1113,7 @@
   }
 
   // ---------------------------------------------------------------- render
-  const PANES = { home, memory, model: modelPage, appearance: appearancePage, speaking: speakingPage, listening: listeningPage, shortcuts: shortcutsPage, routines: routinesPage, general: generalPage, about: aboutPage, whatsnew: whatsNewPage };
+  const PANES = { home, memory, abilities: abilitiesPage, model: modelPage, appearance: appearancePage, speaking: speakingPage, listening: listeningPage, shortcuts: shortcutsPage, general: generalPage, about: aboutPage, whatsnew: whatsNewPage };
   // focusKey: what to focus after (a data-k, or an element id); otherwise whatever had focus keeps it.
   function render(focusKey, animate = false) {
     if (!state) return;
@@ -839,9 +1126,12 @@
     const scroll = $('pane-' + tab).closest('.body').scrollTop;
     head();
     const pane = $(`pane-${tab}`);
+    if (!Object.hasOwn(PANES, tab)) tab = 'home'; // show() only sets page names; this keeps PANES[tab] one of them
     const same = render.tab === tab; render.tab = tab;
     const before = new Set([...pane.querySelectorAll('[data-anim]')].filter(shown).map((n) => n.dataset.anim));
-    const draw = () => { pane.replaceChildren(...PANES[tab]().flat().filter(Boolean)); pane.classList.toggle('paged', !!pane.querySelector('.pagebox')); };
+    // A page with a list fits it to the room left and pages it; any other page scrolls.
+    const draw = () => { pane.replaceChildren(...PANES[tab]().flat().filter(Boolean));
+    pane.classList.toggle('paged', !!pane.querySelector('.pagebox')); keepGone(); };
     draw();
     // Lists show as many rows as fit: drawn once to measure, again if a different number fits.
     if (fit()) draw();
@@ -877,7 +1167,9 @@
   const TABS = Object.keys(PANES);
   const navi = (t) => $(`nav-${t}`);
   function show(name, focus = false) {
-    if (!PANES[name]) name = name === 'settings' ? 'model' : 'home';
+    // Pages that became Abilities tabs (and Memory's old Skills tab) open that tab.
+    if (ABILITY_TABS.some(([id]) => id === name)) { ui.tabs.abilities = name; name = 'abilities'; }
+    if (!Object.hasOwn(PANES, name)) name = name === 'settings' ? 'model' : 'home';
     const changed = name !== tab;
     if (!changed && !focus) return;
     tab = name;
@@ -997,18 +1289,21 @@
   function preview() {
     document.title = 'Roamies panel (preview with sample data)';
     const at = Date.now(), q = new URLSearchParams(location.search);
+    const CLAUDE_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
     const s = {
       version: '0.9.0', os: /Win/.test(navigator.platform) ? 'win' : 'mac',
       status: { state: 'ready', text: 'Ready' }, busy: false, canNew: true,
       model: { provider: 'anthropic', id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', providerLabel: 'Anthropic' },
       providers: [
-        { id: 'anthropic', label: 'Anthropic', on: true, method: 'oauth', key: true, signedIn: true, models: [{ id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5' }, { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' }] },
+        { id: 'anthropic', label: 'Anthropic', on: true, method: 'oauth', key: true, signedIn: true, models: [{ id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', levels: CLAUDE_LEVELS }, { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', levels: CLAUDE_LEVELS }] },
         { id: 'openai', label: 'OpenAI', on: false, method: 'oauth', key: true, models: [] },
-        { id: 'gemini', label: 'Gemini', on: true, method: 'key', key: true, keySaved: true, models: [{ id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' }] },
+        { id: 'gemini', label: 'Gemini', on: true, method: 'key', key: true, keySaved: true, models: [{ id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', levels: ['high'] }] },
         { id: 'moonshot', label: 'Kimi (Moonshot)', on: false, method: 'key', models: [], kinds: [
           { id: 'kimi-code', label: 'Kimi Code', billing: 'Uses your Kimi Code plan. Create the key in the Kimi Code Console.' },
           { id: 'moonshot', label: 'Moonshot', billing: 'Pay-per-token from platform.moonshot.ai.' }] },
-        { id: 'local', label: 'Local models', on: q.has('local'), method: 'local', models: q.has('local') ? [{ id: 'local/ollama/qwen3-vl:8b', name: 'qwen3-vl:8b (Ollama)' }] : [] },
+        { id: 'local', label: 'Local models', on: q.has('local'), method: 'local', models: q.has('local') ? [{ id: 'local/ollama/qwen3-vl:8b', name: 'qwen3-vl:8b (Ollama)', levels: [] }] : [],
+          // A coding model that can't see images: only the subagent pickers offer it.
+          textModels: q.has('local') ? [{ id: 'local/ollama/qwen3-coder:30b', name: 'qwen3-coder:30b (Ollama)', levels: [] }] : [] },
         ...['xAI', 'GLM (Z.ai)', 'MiniMax', 'Xiaomi', 'DeepSeek', 'Sakana', 'OpenRouter', 'Hugging Face'].map((label) => ({ id: label.toLowerCase().replace(/\W/g, ''), label, on: false, method: 'key', models: [] })),
       ],
       // ?local: Ollama connected, LM Studio not running, and an added server whose models can't see images.
@@ -1026,10 +1321,21 @@
         { at: at - 9.2 * 60e3, kind: 'did', text: 'Looked at your screen' },
         { at: at - 9.4 * 60e3, kind: 'ask', text: 'what does this error mean' },
       ],
-      usage: { requests: 14, tokens: 31240 },
+      usage: { requests: 14, tokens: 31240, input: 18400, cacheRead: 96500, cacheWrite: 2140, out: 10700 },
+      usageHistory: [8, 0, 12, 41, 27, 5, 0, 19, 64, 38, 22, 0, 47, 31].map((k, i) => ({ day: new Date(at - (13 - i) * 864e5).toLocaleDateString('en-CA'), tokens: k * 1000, requests: Math.round(k / 2) })),
+      usageTotals: { week: { tokens: 1_420_000, requests: 141 }, month: { tokens: 2_310_000, requests: 230 } },
+      trustAll: false,
       facts: [{ id: 'f1', text: 'Prefers short answers in the morning' }, { id: 'f2', text: 'Working on the Roamies 1.0 launch, due end of month' }, { id: 'f3', text: 'Has a cat called Miso' }],
       commitments: [{ id: 'c1', text: 'Send the launch email', when: 'Fri 7 Nov, 10:00', overdue: false }, { id: 'c2', text: 'Book the dentist', when: 'Mon 3 Nov, 09:00', overdue: true }],
-      name: 'Roamie', look: 'jarvis', looks: [['classic', 'Roamie'], ['jarvis', 'JARVIS'], ['anime', 'Anime Girl'], ['sarah', 'Sarah'], ['adrian', 'Adrian'], ['rita', 'Rita X']],
+      jobs: [{ id: 'j1a2b3c', title: 'Tech news', paused: false, next: 'Thu 6 Nov, 08:00', repeat: 'weekdays', last: 'Last: Summed up 6 stories on AI chips and a Mac update', bad: false },
+        { id: 'j4d5e6f', title: 'Tidy Downloads', paused: true, next: 'Paused', repeat: 'Fri', last: "Didn't run: Allow File Edits & Commands is off", bad: true }],
+      skills: [{ slug: 'export-figma-frames', name: 'Export Figma frames', description: 'When they want frames out of Figma as PNGs at 2x.' },
+        { slug: 'weekly-invoice', name: 'Weekly invoice', description: 'When making the Friday invoice in Numbers from the hours sheet.' }], learnSkills: true,
+      connections: [{ name: 'linear', remote: true, where: 'https://mcp.linear.app/mcp', enabled: true, state: 'connected', toolCount: 23, error: null, trust: 'always' },
+        { name: 'notion', remote: true, where: 'https://mcp.notion.com/mcp', enabled: true, state: 'needs-login', toolCount: 0, error: 'Requires login.' },
+        { name: 'everything', remote: false, where: 'npx -y @modelcontextprotocol/server-everything', enabled: true, state: 'error', toolCount: 0, error: 'spawn npx ENOENT' },
+        { name: 'files', remote: false, where: 'npx -y @modelcontextprotocol/server-filesystem ~/Desktop', enabled: false, state: 'off', toolCount: 0, error: null }],
+      name: 'Roamie', look: 'jarvis', looks: [['classic', 'Roamie'], ['jarvis', 'JARVIS'], ['glayos', 'GlayOS'], ['ultren', 'Ultren'], ['anime', 'Anime Girl'], ['sarah', 'Sarah'], ['adrian', 'Adrian'], ['rita', 'Rita X']],
       size: 'default', sizes: [['default', 'Default'], ['small', 'Small'], ['cursor', 'Cursor']],
       replies: 'voice', fishKey: true, fishModel: 'drama-3', fishFree: false,
       // ?tts=gemini: Gemini as the voice, its key saved.
@@ -1039,13 +1345,29 @@
       geminiShared: new URLSearchParams(location.search).has('shared'), geminiModel: 'gemini-3.8-flash-lite-tts',
       geminiModels: [{ id: 'gemini-3.8-flash-lite-tts', name: 'Flash Lite', per10s: 0.0015 }, { id: 'gemini-3.8-flash-tts', name: 'Flash', per10s: 0.00225 }],
       fishModels: [{ id: 'drama-3', name: 'Drama 3', perM: 50, promo: { perM: 10, until: '2026-12-01T08:00:00Z' } }, { id: 's2.1-pro', name: 'S2.1 Pro', perM: 15 }],
-      voice: { on: true, keys: '⌃⌥', ready: true, mac: true, mute: true, autoListen: q.has('listen'), listenEvery: false, listenSecs: 8, listenChoices: [3, 5, 8, 10, 15], mics: [{ id: 'BuiltIn', name: 'MacBook Pro Microphone' }, { id: 'airpods', name: 'AirPods Pro' }], mic: '', micAuto: 'MacBook Pro Microphone', wakeWord: false, wakeName: 'Roamies', download: null }, askKeys: '⌥⌘', brief: { on: true, todoist: false, canTodoist: true }, focus: { until: null, task: '', list: ['YouTube', 'Reddit', 'X', 'Steam', 'Netflix'], custom: false }, sync: { dir: '', at: null, error: null, paused: false }, shortcuts: { talk: { value: 'control+option', pairs: [['control+option', 'Control+Option'], ['option+command', 'Option+Command'], ['control+command', 'Control+Command'], ['control+shift', 'Control+Shift'], ['option+shift', 'Option+Shift']] }, keys: [{ id: 'summon', words: 'Control+Option+S' }, { id: 'snap', words: 'Control+Option+A' }, { id: 'list', words: 'Control+Option+L' }] }, writeKeys: { value: 'option+command', pairs: [['option+command', 'Option+Command'], ['control+command', 'Control+Command'], ['control+shift', 'Control+Shift'], ['option+shift', 'Option+Shift']] },
-      sound: true, notch: q.has('notch') ? 'drop' : null, actions: false, skipAllow: false, login: { on: true },
+      // Hybrid models: a job on a model picked here (the sidecar sends these; active is the one a heavy job is on right now).
+      hybrid: { on: true, jobs: [
+        { kind: 'code', label: 'Coding and commands', value: '' },
+        { kind: 'computer', label: 'Computer use', value: 'anthropic:claude-sonnet-5' },
+        { kind: 'web', label: 'Web research', value: '' },
+        { kind: 'draw', label: 'Drawing', value: '' },
+        { kind: 'agents', label: 'Background agents', value: '' } ], active: '' },
+      // Subagents: Scout has its own model, Builder follows hybrid's coding model (none set here, so it is off the crew).
+      subagents: { on: true, delegate: 'auto', crew: [
+        { id: 'scout', label: 'Scout', hint: 'Web research.', value: 'gemini:gemini-3.8-flash', via: 'own', uses: 'gemini:gemini-3.8-flash' },
+        { id: 'builder', label: 'Builder', hint: 'Code, pages and scripts.', value: '', via: 'hybrid', uses: 'anthropic:claude-sonnet-5' },
+        { id: 'writer', label: 'Writer', hint: 'Documents, slides and copy.', value: '', via: '', uses: '' } ] },
+      // If a limit is reached: backups 1 and 2 (the Gemini model is free while Claude is at its limit, so it's in use).
+      fallbacks: { on: true, slots: ['gemini:gemini-3.8-flash', ''], limited: [{ label: 'Claude', until: at + 40 * 60e3 }], using: 'gemini:gemini-3.8-flash' },
+      // Effort per slot: '' is automatic (low); computer use is set to High, and backup 1 (Gemini, which only thinks at High) too.
+      efforts: { default: '', computer: 'high', code: '', agents: '', draw: '', web: '', backup1: 'high', backup2: '' },
+      voice: { on: true, keys: '⌃⌥', ready: true, mac: true, lang: 'auto', langOnline: null, studioSpeak: 'short', mute: true, autoListen: q.has('listen'), listenEvery: false, listenSecs: 8, listenChoices: [3, 5, 8, 10, 15], mics: [{ id: 'BuiltIn', name: 'MacBook Pro Microphone' }, { id: 'airpods', name: 'AirPods Pro' }], mic: '', micAuto: 'MacBook Pro Microphone', wake: !q.has('nowake'), wakeWord: false, wakeName: 'Roamies', download: null }, askKeys: '⌥⌘', brief: { on: true, todoist: false, canTodoist: true }, focus: { until: null, task: '', list: ['YouTube', 'Reddit', 'X', 'Steam', 'Netflix'], custom: false }, sync: { dir: '', at: null, error: null, paused: false }, shortcuts: { talk: { value: 'control+option', pairs: [['control+option', 'Control+Option'], ['option+command', 'Option+Command'], ['control+command', 'Control+Command'], ['control+shift', 'Control+Shift'], ['option+shift', 'Option+Shift']] }, keys: [{ id: 'summon', words: 'Control+Option+S' }, { id: 'snap', words: 'Control+Option+A' }, { id: 'list', words: 'Control+Option+L' }] }, writeKeys: { value: 'option+command', pairs: [['option+command', 'Option+Command'], ['control+command', 'Control+Command'], ['control+shift', 'Control+Shift'], ['option+shift', 'Option+Shift']] },
+      sound: true, notch: q.has('notch') || q.has('capsule') ? 'drop' : null, notchReal: q.has('notch'), actions: false, skipAllow: false, login: { on: true },
       update: { available: new URLSearchParams(location.search).has('update') && new URLSearchParams(location.search).get('update') !== 'failed' ? '0.9.1' : null, installing: false, checking: false, result: null },
       intro: false,
     };
     if (q.has('busy')) Object.assign(s, { busy: true, status: { state: 'busy', text: 'Reading notes.md' } });
-    if (q.has('empty')) Object.assign(s, { recent: [], facts: [], commitments: [], usage: null });
+    if (q.has('empty')) Object.assign(s, { recent: [], facts: [], commitments: [], jobs: [], skills: [], connections: [], usage: null });
     if (q.has('many')) {
       const things = ['Prefers short answers', 'Drinks oat flat whites', 'Works late on Thursdays', 'Has a cat called Miso', 'Training for a 10k in March', 'Learning Japanese', 'Uses Figma for design', 'Ships on Fridays', 'Allergic to peanuts', 'Sister is called Ana'];
       s.facts = Array.from({ length: 100 }, (_, i) => ({ id: `f${i}`, text: `${things[i % things.length]}${i >= things.length ? ` (${Math.floor(i / things.length) + 1})` : ''}` }));
@@ -1070,7 +1392,7 @@
     // ?v=0.1.36&from=0.1.35: What's new as it looks just after updating from one version to the other.
     if (q.get('v')) s.version = q.get('v');
     if (q.get('from')) s.whatsNewFrom = q.get('from');
-    if (q.get('tab')) setTimeout(() => { if (q.get('mtab')) ui.mtab = q.get('mtab'); show(q.get('tab')); }, 0);
+    if (q.get('tab')) setTimeout(() => { if (q.get('mtab')) ui.mtab = q.get('mtab'); if (q.get('atab')) ui.tabs.abilities = q.get('atab'); show(q.get('tab')); }, 0);
     setTimeout(() => window.__panel({ kind: 'state', state: s }), 0);
     return async (cmd, args) => {
       if (cmd !== 'sidecar_send') return null;
@@ -1082,8 +1404,18 @@
       if (id.startsWith('tts:')) { s.tts = id.slice(4); s.studio = s.tts === 'voicestudio' ? STUDIO[q.get('studio')] ?? STUDIO.on : null; setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
       if (id.startsWith('studiovoice:') && s.studio) { s.studio.voice = id.slice(12) === 'default' ? null : id.slice(12); setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
       if (id === 'lite') { s.lite = !s.lite; setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
+      if (id === 'hybrid') { s.hybrid.on = !s.hybrid.on; setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
+      if (id === 'backups') { s.fallbacks.on = !s.fallbacks.on; setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
+      if (id.startsWith('effort_')) { const at = id.indexOf(':'); s.efforts[id.slice(7, at)] = id.slice(at + 1); setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
       if (s.voice && ['autolisten', 'listenevery'].includes(id)) { const k = id === 'autolisten' ? 'autoListen' : 'listenEvery'; s.voice[k] = !s.voice[k]; setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
+      if (s.voice && id.startsWith('speechlang:')) { s.voice.lang = id.slice(11); s.voice.langOnline = ['ar-SA', 'he-IL'].includes(s.voice.lang) ? true : null; setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
       if (s.voice && id.startsWith('listensecs:')) { s.voice.listenSecs = Number(id.slice(11)); setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
+      // Removing a row (a skill, connection, job, fact or commitment) comes back as new state, as from the sidecar.
+      const gone = [[/^skill:forget:(.+)$/, 'skills', (x, v) => x.slug === v], [/^mcp:remove:(.+)$/, 'connections', (x, v) => x.name === v], [/^job:remove:(.+)$/, 'jobs', (x, v) => x.id === v],
+        [/^forget:(.+)$/, 'facts', (x, v) => x.id === v], [/^(?:done|drop):(.+)$/, 'commitments', (x, v) => x.id === v]].find(([re]) => re.test(id));
+      if (gone) { const v = id.match(gone[0])[1]; s[gone[1]] = s[gone[1]].filter((x) => !gone[2](x, v)); setTimeout(() => window.__panel({ kind: 'state', state: s }), Number(q.get('lag') ?? 120)); }
+      if (id.startsWith('mcp:trust:')) { const [, , name, mode] = id.split(':'); s.connections = s.connections.map((x) => (x.name === name ? { ...x, trust: mode } : x)); setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
+      if (id === 'mcp:trustall') { s.trustAll = !s.trustAll; setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
       if (id.startsWith('look:')) { s.look = id.slice(5); s.name = s.looks.find(([v]) => v === s.look)?.[1] ?? s.name; setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
       return null;
     };

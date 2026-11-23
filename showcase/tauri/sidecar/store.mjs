@@ -1,13 +1,15 @@
-// Sidekick storage: conversation sessions and the commitments memory, under ~/.gg/sidekick/.
+// Sidekick storage: conversation sessions and the commitments memory, under ~/Roamies/Data/ (datadir.mjs).
 // Writes are atomic (temp file, fsync, rename) and serialised per file, files are private (0600),
 // and a file that fails to parse is kept aside as *.corrupt-<time> instead of being overwritten.
+import { dataPaths, roamiesDir } from './datadir.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, renameSync } from 'node:fs';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
-export const DIR = process.env.ROAMIES_DATA_DIR ? path.join(process.env.ROAMIES_DATA_DIR, 'sidekick') : path.join(os.homedir(), '.gg', 'sidekick');
+// Everything lives in one visible Roamies folder in their home: agents' work, skills, and app data in DIR (Roamies/Data).
+export const roamiesRoot = () => roamiesDir();
+export const DIR = dataPaths().dir;
 const SESSIONS = path.join(DIR, 'sessions');
 const MEMORY = path.join(DIR, 'memory.json');
 const SESSION_FILE = /^\d{8}-\d{6}-[a-z0-9]{6}\.json$/;

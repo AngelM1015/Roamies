@@ -49,7 +49,7 @@
       let userForm = form;
       // Look: 'classic' (the goo blob, and the arrow at cursor size), 'jarvis' (roamies/jarvis.js: a globe of
       // points with a lit heart, and a HUD reticle at cursor size) or a character from roamies/people.js
-      // ('anime', 'sarah', 'adrian', 'rita'). Moves, sizes and everything else are shared.
+      // ('anime', 'sarah', 'adrian', 'rita', 'ultren', 'glayos'). Moves, sizes and everything else are shared.
       const drawn = (l) => (l === 'jarvis' ? Roamie.jarvis : Roamie.people?.[l]);
       const pickLook = (l) => (drawn(l) ? l : 'classic');
       let look = pickLook(typeof location !== 'undefined' ? new URLSearchParams(location.search).get('look') : null);
@@ -196,6 +196,7 @@
           if (kind === 'angry') dy = Math.round(inner * 2.4) - 1;
           else if (kind === 'determined') dy = Math.round(inner * 1.4) - 1;
           else if (kind === 'raised') dy = -1 + Math.round(Math.abs(u) * 1.2) - (b.s > 0 ? 1 : 0);
+          else if (kind === 'sad') dy = -Math.round(inner * 1.4);
           for (let k = 0; k < thick; k++) put(b.x + i, b.y + dy - k, 0);
         }
       };
@@ -488,6 +489,7 @@
           wide: face.wide, dizzy: face.dizzy, happy: face.happy, sleepy: Math.max(env.sleepy ?? 0, face.sleepy ?? 0),
           mouth: pose?.mouth ?? (act && { wave: null, hype: 'shout', remind: 'o', upset: 'frown', motivate: 'grin' }[A]),
           brow: pose ? pose.brow : A === 'upset' ? 'angry' : A === 'motivate' ? 'determined' : A === 'remind' ? 'raised' : null,
+          rest: pose?.rest ?? null, feel: pose?.feel ?? null, // the voice's feeling: the mouth between words, and JARVIS's heart
         });
         // The globe's points overlap (the brightest wins); a character is drawn in layers (the last one wins).
         if (look !== 'jarvis') {
@@ -535,7 +537,7 @@
         o, m, face, sq, hands, PAL, L, th, put, disc, line, setPx, spawn, S, startAct,
         get P() { return P; }, get R() { return R; }, get gw() { return gw; }, get gh() { return gh; }, get t() { return t; },
         get busy() { return !!act; },
-        appear, vanish,
+        appear, vanish, teleport,
         stopAct: () => { if (act) { act = null; nextAct = rand(3, 6); } },
         get morphing() { return !!mo; },
         blink: (mid) => blink(mid),

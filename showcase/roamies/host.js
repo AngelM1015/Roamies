@@ -27,6 +27,8 @@
   window.__roamieBuddy = (m) => { Roamie.wake?.(); Roamie.buddy.onEvent?.(m); };
   // handsBusy: Roamies is acting in another app (it may take the real cursor), so clicks always go through.
   let hot = null, cursor = null, handsBusy = false;
+  // A pinned Roamie: the request last applied, so a screen size or scale change puts it back on the right corner.
+  let pinAsk = null;
   // Linux ("x11" or "wayland", set by the shell): clicks are let through by region instead (below).
   const LINUX = !!window.ROAMIE_LINUX;
   const setHot = (h) => { if (!LINUX && h !== hot) { hot = h; invoke('set_hot', { hot: h }).catch(() => { hot = null; }); } };
@@ -38,6 +40,10 @@
     const h = Roamie.ptr(x, y, t);
     setHot(h && !handsBusy && !Roamie.game);
   };
+  // The shell only sends the cursor when it moves, but what's under a resting cursor can change (an Allow button
+  // grows into place there while a reply is spoken): look again a few times a second, or a click on it goes to the
+  // app below until the mouse moves. Linux sends its click areas on a timer of its own (below).
+  if (!LINUX) setInterval(() => { if (cursor && window.Roamie?.ptr) setHot(Roamie.ptr(cursor[0], cursor[1]) && !handsBusy && !Roamie.game); }, 120);
   // macOS: a fullscreen game is in front (fullscreen.rs). It holds the cursor, so every click is its own and the
   // Sidekick stops following the cursor (agent.js).
   window.__roamieGame = (on) => { if (!window.Roamie) return; Roamie.game = !!on; if (on) setHot(false); };
@@ -49,6 +55,14 @@
     let sent = '', sentAt = 0;
     setInterval(() => {
       if (!window.Roamie?.hitTest) return;
+      // Acting in another app: let every click through (the pet can sit where the click lands).
+      if (handsBusy) {
+        if (sent !== '') {
+          sent = ''; sentAt = performance.now();
+          invoke('set_hit_rects', { rects: [] }).catch(() => { sent = null; });
+        }
+        return;
+      }
       const rects = [];
       const grown = (r) => rects.push(Math.floor(r[0]) - 8, Math.floor(r[1]) - 8, Math.ceil(r[2]) + 16, Math.ceil(r[3]) + 16);
       for (const r of Roamie.inkRects?.() ?? []) grown(r);
@@ -57,6 +71,8 @@
       const bar = Roamie.askBarRect?.();
       if (bar) grown(bar);
       for (const r of Roamie.homeRects?.() ?? []) grown(r);
+      const capsule = Roamie.notchTakes?.() ? Roamie.notchRect?.() : null;
+      if (capsule) grown(capsule);
       // Sampled a little past the canvas: hit areas can reach beyond what's drawn.
       const box = Roamie.hitBox();
       if (box) rects.push(...Roamie.hitRects(Roamie.hitTest, [box[0] - 48, box[1] - 48, box[2] + 96, box[3] + 96]));
@@ -77,7 +93,7 @@
   const field = document.createElement('input');
   Object.assign(field.style, { position: 'fixed', left: '0', top: '0', width: '1px', height: '1px', opacity: '0', pointerEvents: 'none' });
   // Its name is its look's (the sidecar's LOOKS).
-  const NAMES = { classic: 'Roamie', jarvis: 'JARVIS', anime: 'Anime Girl', sarah: 'Sarah', adrian: 'Adrian', rita: 'Rita X' };
+  const NAMES = { classic: 'Roamie', jarvis: 'JARVIS', glayos: 'GlayOS', ultren: 'Ultren', anime: 'Anime Girl', sarah: 'Sarah', adrian: 'Adrian', rita: 'Rita X' };
   field.setAttribute('aria-label', 'Message for Roamie');
   field.autocomplete = 'off'; field.spellcheck = false;
   document.addEventListener('DOMContentLoaded', () => document.body.appendChild(field));
@@ -112,7 +128,7 @@
       // What it's saying stays up while you type: only what's sent interrupts it.
       ask = { id: m.id, bar: true, h: { close: () => bar.close(), focus() {} }, choices: null, sel: -1, label: null };
       bar.open({
-        placeholder: m.prompt || m.placeholder || '', label: field.getAttribute('aria-label'), cursor,
+        placeholder: m.prompt || m.placeholder || '', value: m.value || '', label: field.getAttribute('aria-label'), cursor,
         onKey: (e) => askKey(e, bar.value, true), onPress: focusField, onLeft: () => finishAsk(null),
       });
       focusField();
@@ -252,7 +268,7 @@
   // While a drawing plays, the rest of the answer (its last line, the end of the turn) waits for it, so the reply's
   // bubble doesn't ride along on the drawing cursor. Drawings themselves, and a new request or an error, never wait.
   let deferred = null;
-  const PASS = new Set(['draw', 'ink_clear', 'ink_stale', 'start', 'error', 'tool_target', 'tool_image']);
+  const PASS = new Set(['draw', 'ink_clear', 'ink_stale', 'start', 'error', 'tool_target', 'tool_image', 'list_items']);
   function onAgent(e) {
     if (e.type === 'start' || e.type === 'error') flushDeferred();
     // Notch mode: the words and the end of the turn go to the capsule, never held behind a drawing.
@@ -368,6 +384,8 @@
         break;
       case 'ink_clear': Roamie.ink?.clear(e); break;
       case 'ink_stale': Roamie.ink?.stale(); break;
+      // A drawn list's items after the user added or edited one on the card.
+      case 'list_items': Roamie.ink?.listItems?.(e.part, e.items); break;
       case 'tool_target': {
         // The real window being captured, in global screen points → this overlay's coordinates.
         const job = current?.id === e.id ? current : jobs.find((j) => j.id === e.id);
@@ -400,7 +418,8 @@
         if (research) panel()?.end(fromWeb ? 'From the web' : 'Answer');
         research = waveTurn = false;
         endTalk();
-        if (notchOn()) N().done({ speech: e.speech });
+        // A request that did something can be rated: Good or Wrong under the reply (the sidecar learns from it).
+        if (notchOn()) N().done({ speech: e.speech, ...(e.rate ? { rate: (good) => send({ type: 'feedback', good }) } : {}) });
         if (e.listen) waitThenListen(e.listen);
         reportSaid(e.speech);
         break;
@@ -465,10 +484,10 @@
       Roamie.sfx?.play('heard');
     } else if (m.type === 'state' && m.state === 'idle') {
       // Nothing was heard (or it was cancelled): no answer is coming for that talk.
-      if (m.cancelled || !heardText) { waveTurn = false; if (notchOn() && !responding) N().close(); }
+      if (m.cancelled || !heardText) { waveTurn = false; if (notchOn() && !responding && !ask) N().close(); }
       // Heard, but no turn ever started (or it never ended): don't leave 'Thinking' up for good.
       // Only for this take: a newer one (talking again within the 20 s) keeps its capsule.
-      else if (notchOn()) { const take = listenTake; setTimeout(() => { if (take === listenTake && !responding && Roamie.notch?.active) N().close(); }, 20000); }
+      else if (notchOn()) { const take = listenTake; setTimeout(() => { if (take === listenTake && !responding && !ask && Roamie.notch?.active) N().close(); }, 20000); }
       heardText = false;
       listen?.close(); listen = null;
       if (heard) { const h = heard; setTimeout(() => { if (heard === h) { h.close(); heard = null; } }, 4000); }
@@ -484,6 +503,8 @@
     dispatchEvent(new Event('resize')); // the screen's scale may differ even when its size doesn't
     for (const m of q) window.__roamieHost(m);
   };
+  addEventListener('resize', () => { if (pinAsk) requestAnimationFrame(() => pinAt(pinAsk)); });
+
   window.__roamieMoved = () => {
     dropAutoListen();
     const a = getAgent();
@@ -496,9 +517,31 @@
     addEventListener('resize', () => requestAnimationFrame(() => requestAnimationFrame(flush)), { once: true });
   };
 
+  // Pin the Roamie: a corner (top-right, bottom-left, ...) or screen px, kept clear of the work area edges.
+  const pinAt = (m) => {
+    const a = getAgent();
+    if (!a) return null;
+    pinAsk = m.release ? null : m;
+    if (m.release) { a.unpin?.(); return null; }
+    const S = Roamie.safe ?? {};
+    const r = a.pos?.r ?? 36;
+    const pad = Number.isFinite(m.margin) ? Math.max(0, m.margin) : 14;
+    const c = String(m.corner || '').toLowerCase();
+    // Its whole drawing, not just the body: the same room agent.js keeps (spotOK), with the bubble above it.
+    const side = r * 1.6, top = r * 1.8, low = r * 1.5;
+    const L = (S.left || 0) + side, Rt = innerWidth - (S.right || 0) - side, T = (S.top || 0) + top, B = innerHeight - (S.bottom || 0) - low;
+    let x = Number.isFinite(m.x) ? m.x : /right/.test(c) ? Rt - pad : /left/.test(c) ? L + pad : innerWidth / 2;
+    let y = Number.isFinite(m.y) ? m.y : /bottom/.test(c) ? B - pad : /top/.test(c) ? T + pad : innerHeight / 2;
+    x = Math.max(L, Math.min(Rt, x));
+    y = Math.max(T, Math.min(B, y));
+    a.pin?.(Math.round(x), Math.round(y));
+    return { x: Math.round(x), y: Math.round(y) };
+  };
+
   window.__roamieHost = (m) => {
     Roamie.wake?.(); // the frame loop naps while the sidekick is hidden
     if (m.kind === 'speech') { Roamie.voiceOut?.handle(m); return; } // plays on, even while it changes screens
+    if (m.kind === 'volume') { Roamie.voiceOut?.setVolume(m.v); if (Roamie.sfx) Roamie.sfx.volume = m.v; return; }
     if (held) { held.q.push(m); return; }
     if (m.kind === 'notch') { if (Roamie.notch) { Roamie.notch.enabled = !!m.on; if (m.style) Roamie.notch.style = m.style; if (!m.on) Roamie.notch.close(); } return; }
     if (m.kind === 'sound') { if (Roamie.sfx) Roamie.sfx.enabled = m.on; return; }
@@ -510,6 +553,7 @@
       return;
     }
     if (!getAgent()) return;
+    if (m.kind === 'avatar_pin') { pinAt(m); return; }
     if (m.kind === 'agents') {
       // A launch flies out of the visible Roamie (or from the cursor); the hatch, when there is one, wins.
       const a = getAgent();
@@ -523,19 +567,34 @@
       if (m.step) {
         const [x, y, w, h] = m.step.bounds, o = Roamie.origin ?? { x: 0, y: 0 }, px = x + w / 2 - o.x, py = y + h / 2 - o.y;
         // A spot on another display isn't this overlay's to show.
-        if (px >= 0 && py >= 0 && px <= innerWidth && py <= innerHeight) { hand?.begin(); hand?.at(px, py); }
+        if (px >= 0 && py >= 0 && px <= innerWidth && py <= innerHeight) { hand?.begin(); hand?.at(px, py, { tap: !m.step.hover }); }
       } else if (m.borrow) hand?.begin();
       else { handsBusy = !!m.on; if (handsBusy) setHot(false); else hand?.end(); }
       return;
     }
-    if (m.kind === 'greet') { getAgent().act('wave'); return; }
+    // Launch (and the relaunch after an update): the capsule says hi when it's on, else the Roamie waves by the cursor.
+    if (m.kind === 'greet') { if (notchOn()) N().hello(); else getAgent().act('wave'); return; }
     if (m.kind === 'intro') { if (capR()) N().say(m.text); else getAgent().intro(m.x, m.text); return; }
     if (m.kind === 'esc') { onEsc(); return; }
     if (m.kind === 'summon') {
-      // ⌃⌥S toggles; the menu's Show Sidekick only ever shows.
+      // ⌃⌥S toggles; the menu's Show Sidekick only ever shows. With the capsule on, it's the capsule that comes out.
+      if (notchOn()) {
+        if (!N().active) N().hello();
+        else if (!m.show) {
+          if (responding || Roamie.voiceOut?.playing()) { send({ type: 'menu', id: 'stop', via: 'hide' }); Roamie.voiceOut?.stop(); }
+          N().close();
+        }
+        return;
+      }
       const a = getAgent();
-      if (m.show || !a.visible) { if (a.show({ summoned: true })) a.act('wave'); }
-      else a.hide();
+      if (m.show || !a.visible) { if (a.show({ summoned: true })) a.act('wave'); Roamie.agentHome?.show?.(); }
+      else {
+        // Sent away mid-answer: it stops talking too, like Esc (#108).
+        if (responding || Roamie.voiceOut?.playing()) { send({ type: 'menu', id: 'stop', via: 'hide' }); Roamie.voiceOut?.stop(); }
+        a.hide();
+        // The agents' corner is part of the same summon: it leaves too, and comes back with the next one.
+        Roamie.agentHome?.hide?.();
+      }
       return;
     }
     if (m.kind === 'say') { if (!ask || ask.bar) { if (capR()) N().say(m.text); else getAgent().say(m.text, { mood: m.mood ?? null }); } } // the field leaves the bubble free
@@ -554,7 +613,7 @@
   // way out once the Roamie has gone). Cards left on screen have their own close button and don't hold Esc. The
   // reminders card does while it shows (it goes by itself in a few seconds).
   // A voice turn counts too: on macOS the sidekick steps away while the mic is on and until the answer shows.
-  const up = () => !!(getAgent()?.visible || Roamie.notch?.active || ask || Roamie.panel?.isOpen || Roamie.ink?.playing || Roamie.ink?.loose || Roamie.ink?.reminding || hearing || waveTurn || Roamie.voiceOut?.playing());
+  const up = () => !!(getAgent()?.visible || responding || Roamie.notch?.active || ask || Roamie.panel?.isOpen || Roamie.ink?.playing || Roamie.ink?.loose || Roamie.ink?.reminding || hearing || waveTurn || Roamie.voiceOut?.playing());
   function onEsc() {
     dropAutoListen();
     const a = getAgent();

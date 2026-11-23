@@ -6,7 +6,25 @@
 <style>
   /* Bubble and research-card text (the setup guide's body font). */
   @font-face { font-family: "Martian Mono"; src: url("onboarding/fonts/martian-mono.woff2") format("woff2"); font-weight: 100 800; font-display: swap; }
-  /* Headings on drawn cards and tickets. */
+  /* Arabic (Readex Pro): the letters of an Arabic reply, which Martian Mono has none of. */
+  @font-face {
+    font-family: "Roamies Arabic";
+    src: url("onboarding/fonts/readex-pro-arabic.woff2") format("woff2");
+    font-weight: 160 700;
+    font-display: swap;
+    /* Arabic letters only: the Latin side of every stack stays Martian Mono, spaces and all. */
+    unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF, U+200C-200F, U+2010-2011, U+204F;
+  }
+  @font-face {
+    font-family: "Roamies Arabic RTL";
+    src: url("onboarding/fonts/readex-pro-arabic.woff2") format("woff2");
+    font-weight: 160 700;
+    font-display: swap;
+    /* The same file, also taking the space and common punctuation: first in the stack of right-to-left text only, so Arabic
+       words and their ! . , ? sit a normal distance apart instead of a full monospace cell. */
+    unicode-range: U+0020-0021, U+0028-0029, U+002C-002E, U+003A-003B, U+003F, U+00A0, U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF, U+200C-200F, U+2010-2011, U+204F;
+  }
+/* Headings on drawn cards and tickets. */
   @font-face { font-family: "Doto"; src: url("onboarding/fonts/doto.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
   /* Sized and moved by core.js to cover just what's drawn. */
@@ -33,7 +51,7 @@
 <script src="roamies/people.js"></script>
 <script src="roamies/10-dither.js"></script>
 <script src="roamies/12-sidekick.js"></script>
-<script>Roamie.bootDesktop(document.getElementById("stage")); document.fonts.load('500 13px "Martian Mono"');</script>
+<script>Roamie.bootDesktop(document.getElementById("stage")); document.fonts.load('500 13px "Martian Mono"'); document.fonts.load('500 13px "Roamies Arabic"', 'م'); document.fonts.load('500 13px "Roamies Arabic RTL"', 'م ');</script>
 <script src="roamies/ink3d.js"></script>
 <script src="roamies/world.js"></script>
 <script src="roamies/ink.js"></script>

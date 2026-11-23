@@ -19,7 +19,7 @@
     0 calc(100% - var(--s) * 2), 0 calc(var(--s) * 2), var(--s) calc(var(--s) * 2), var(--s) var(--s), calc(var(--s) * 2) var(--s));
   position: fixed; z-index: 5; width: 380px; display: flex; flex-direction: column;
   background: var(--line-hot); clip-path: var(--notch); padding: 2px; box-sizing: border-box;
-  font: 400 12.5px/1.6 "Martian Mono", ui-monospace, Menlo, monospace; color: var(--ink);
+  font: 400 12.5px/1.6 "Martian Mono", "Roamies Arabic", ui-monospace, Menlo, monospace; color: var(--ink);
   filter: drop-shadow(0 0 10px rgba(120, 255, 226, .18)) drop-shadow(0 8px 22px rgba(0, 0, 0, .45));
   opacity: 0; transform: translateX(-8px) scale(.98); transform-origin: top left;
   transition: opacity .16s var(--ease), transform .16s var(--ease); pointer-events: auto; cursor: default; }
@@ -39,7 +39,7 @@
 .rp-body > :first-child { margin-top: 0; }
 .rp-body p { margin: 0 0 8px; }
 .rp-body p.lead { font-weight: 600; font-size: 13.5px; line-height: 1.5; color: var(--ink); margin-bottom: 10px; }
-.rp-body h4 { margin: 12px 0 6px; font: 600 11px/1.3 "Martian Mono", ui-monospace, monospace; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
+.rp-body h4 { margin: 12px 0 6px; font: 600 11px/1.3 "Martian Mono", "Roamies Arabic", ui-monospace, monospace; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
 .rp-body ul, .rp-body ol { margin: 0 0 8px; padding: 0; list-style: none; }
 .rp-body li { position: relative; padding-left: 16px; margin: 0 0 6px; color: var(--ink-2); }
 .rp-body ul > li::before { content: ""; position: absolute; left: 2px; top: .62em; width: 5px; height: 5px; background: var(--accent); }
@@ -50,6 +50,9 @@
 .rp-body em { font-style: italic; color: var(--ink); }
 .rp-body s { color: var(--ink-3); }
 .rp-body code { font: inherit; color: var(--accent); }
+/* Arabic and Hebrew paragraphs (dir=auto): the Arabic font first, for its own word spacing; code stays monospace. */
+.rp-body :dir(rtl) { font-family: "Roamies Arabic RTL", "Martian Mono", "Roamies Arabic", ui-monospace, Menlo, monospace; }
+.rp-body pre, .rp-body code, .rp-body :dir(rtl) pre, .rp-body :dir(rtl) code { font-family: "Martian Mono", "Roamies Arabic", ui-monospace, Menlo, monospace; }
 .rp-body a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; cursor: pointer; }
 .rp-body a:hover { color: #a8ffed; }
 .rp-body a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -57,7 +60,7 @@
 .rp-body blockquote { margin: 0 0 8px; padding: 2px 0 2px 12px; border-left: 2px solid var(--line-hi); color: var(--ink-2); }
 .rp-body blockquote p { margin: 0 0 4px; }
 .rp-body pre { margin: 0 0 10px; padding: 9px 11px; background: #030c0d; border: 1px solid #12302e; overflow-x: auto;
-  font: 400 11.5px/1.55 "Martian Mono", ui-monospace, monospace; color: var(--ink-2); white-space: pre; }
+  font: 400 11.5px/1.55 "Martian Mono", "Roamies Arabic", ui-monospace, monospace; color: var(--ink-2); white-space: pre; }
 .rp-body pre code { color: inherit; }
 .rp-body hr { border: 0; border-top: 1px solid #12302e; margin: 10px 0; }
 .rp-table { overflow-x: auto; margin: 0 0 10px; }

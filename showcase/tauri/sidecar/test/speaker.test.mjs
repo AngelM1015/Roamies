@@ -13,10 +13,10 @@ class FakeVoice {
   abort() { this.aborted = true; }
   rebind(cbs) { Object.assign(this, cbs); return true; }
 }
-const setup = (acct = { ok: true, credit: 4.5 }, beatPhrases = [], bundled = () => null) => {
+const setup = (acct = { ok: true, credit: 4.5 }, beatPhrases = [], bundled = () => null, more = {}) => {
   made.length = 0;
   const out = [], problems = [];
-  const sp = createSpeaker({ emit: (m) => out.push(m), onProblem: (p) => problems.push(p), FishVoiceImpl: FakeVoice, account: async () => acct, beatPhrases, bundled });
+  const sp = createSpeaker({ emit: (m) => out.push(m), onProblem: (p) => problems.push(p), FishVoiceImpl: FakeVoice, account: async () => acct, beatPhrases, bundled, ...more });
   return { sp, out, problems };
 };
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -113,8 +113,9 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
   assert.equal(r.beat(), true);
   assert.ok(BEATS.includes(live.said[0]));
 }
-{ // Drama 3 fails before any audio with credit left → S2.1 Pro, and the one that worked is kept for the next reply.
-  const { sp, problems } = setup();
+{ // Drama 3 fails before any audio with credit left → S2.1 Pro, kept for the next replies, then back to Drama 3 (#127).
+  let t = 1_000_000;
+  const { sp, problems } = setup(undefined, [], () => null, { now: () => t });
   sp.setKey('k'); await tick();
   const r = sp.start(); r.say('Hi.'); r.end();
   const v = made.slice(made.length - 1); // this reply's sockets (an earlier test's beat warm-up can add to made)
@@ -124,6 +125,9 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
   v[1].onAudio(new Uint8Array([0, 0])); v[1].onEnd();
   assert.equal(sp.model, 's2.1-pro'); assert.deepEqual(problems, []);
   sp.start(); assert.equal(made.at(-1).model, 's2.1-pro');
+  t += 9 * 60_000; sp.start(); assert.equal(made.at(-1).model, 's2.1-pro', 'still within ten minutes');
+  t += 60_000; sp.start(); assert.equal(made.at(-1).model, 'drama-3', 'back to the pick after ten minutes');
+  assert.equal(sp.model, 'drama-3');
 }
 { // Every model fails before audio → tried once on each, then one problem report.
   const { sp, problems } = setup();
@@ -418,4 +422,133 @@ console.log('bundled beats: passed');
   assert.equal(made.at(-1).voice, 'someone-else');
   r2.abort();
   console.log('speaker prewarm tests: passed');
+}
+
+{ // VoiceStudio keep-warm and prewarm, on a fake clock: no timer before the first real reply; a throwaway word every 4
+  // minutes after one (audio dropped, nothing emitted); none while a reply runs; ends 30 minutes after the last reply;
+  // and a provider change ends it. Prewarm pings when the last request is over a minute old, never during a reply.
+  const M = 60_000;
+  const clock = { t: 0, timers: [] };
+  const setTimer = (f, ms) => { const h = { f, at: clock.t + ms, live: true, unref() {} }; clock.timers.push(h); return h; };
+  const clearTimer = (h) => { if (h) h.live = false; };
+  const advance = (ms) => {
+    const end = clock.t + ms;
+    for (;;) {
+      const next = clock.timers.filter((h) => h.live && h.at <= end).sort((a, b) => a.at - b.at)[0];
+      if (!next) break;
+      clock.t = next.at; next.live = false; next.f();
+    }
+    clock.t = end;
+  };
+  const local = [], pingAt = [], out = [], logs = [];
+  let failNext = false; // the next throwaway fails instead of ending
+  class FakeLocal {
+    constructor(o) { Object.assign(this, o); this.said = []; local.push(this); }
+    open() { return this; }
+    say(s) { this.said.push(s); }
+    end() { // a throwaway ends at once; a reply waits for its test to end it
+      if (this.said.join() !== 'Hm.') return;
+      if (failNext) { failNext = false; this.onError(new Error('offline')); return; }
+      pingAt.push(clock.t); this.onEnd();
+    }
+    abort() { this.aborted = true; }
+  }
+  const sp = createSpeaker({ emit: (m) => out.push(m), log: (k) => logs.push(k), FishVoiceImpl: FakeVoice, account: async () => ({ ok: true, credit: 5 }), beatPhrases: [], bundled: () => null,
+    LocalVoiceImpl: FakeLocal, localStatus: async () => ({ ok: true, engine: 'omnivoice', voices: [] }), keepWarmMs: 4 * M, keepWarmIdleMs: 30 * M, studioQuietMs: M, now: () => clock.t, setTimer, clearTimer });
+  sp.setProvider('voicestudio'); await tick();
+  const live = () => clock.timers.filter((h) => h.live).length;
+  // Phase 1: nothing before the first real reply.
+  advance(60 * M);
+  assert.equal(local.length, 0, 'no throwaway before the first real use');
+  assert.equal(live(), 0, 'no timer before the first real use');
+  // Phase 2: a real reply at 60 min; pings at 64, 72, 76, ... (68 is skipped, a reply is running).
+  const r1 = sp.start(); r1.say('Hi.'); r1.end(); local.at(-1).onEnd();
+  assert.equal(live(), 1, 'the schedule starts with the first real reply');
+  advance(4 * M);
+  assert.deepEqual(pingAt, [64 * M], 'a throwaway word at 4 minutes');
+  assert.equal(out.filter((m) => m.kind === 'speech' && m.pcm).length, 0, 'the throwaway is never emitted');
+  advance(2 * M); // 66 min
+  const r2 = sp.start(); r2.say('Long one.');
+  advance(2 * M); // 68 min: the tick comes while r2 runs
+  assert.deepEqual(pingAt, [64 * M], 'skipped while a reply is in flight');
+  assert.equal(local.at(-1).said.join(), 'Long one.', 'the reply is still the live socket');
+  local.at(-1).onEnd(); // r2 ends at 68
+  advance(4 * M); // 72
+  assert.deepEqual(pingAt, [64 * M, 72 * M]);
+  advance(20 * M); // to 92: 76, 80, 84, 88, 92
+  assert.equal(pingAt.length, 7);
+  // Phase 3: 30 minutes after the last real reply (66 min) → at 96 the schedule ends, and it stays ended.
+  advance(4 * M);
+  assert.equal(pingAt.length, 7, 'no ping once 30 minutes have passed with no real reply');
+  assert.equal(live(), 0, 'the schedule has ended');
+  advance(120 * M);
+  assert.equal(pingAt.length, 7);
+  // Phase 4: a new real reply starts it again; a provider change stops it.
+  const r3 = sp.start(); r3.say('Again.'); local.at(-1).onEnd();
+  assert.equal(live(), 1, 'a new real reply restarts it');
+  sp.setProvider('fish');
+  assert.equal(live(), 0, 'a provider change stops it');
+  advance(30 * M);
+  assert.equal(pingAt.length, 7);
+  // Errors in a throwaway are quiet: no log, and the next one can go.
+  sp.setProvider('voicestudio'); await tick();
+  const n = logs.length;
+  failNext = true; sp.prewarm(); // the last request was long ago: a throwaway, which fails
+  assert.equal(logs.length, n, 'a failed throwaway logs nothing');
+  assert.equal(pingAt.length, 7, 'and is not counted as a ping');
+  advance(2 * M); sp.prewarm();
+  assert.equal(pingAt.length, 8, 'after a failure the next one goes');
+  // Stopping a reply and the warm-up: the schedule keeps its own clock; stopWarm ends it.
+  const r4 = sp.start(); r4.say('Hi.'); local.at(-1).onEnd();
+  assert.equal(live(), 1);
+  sp.stopWarm();
+  assert.equal(live(), 0, 'stopWarm ends it');
+  // Prewarm: pings when the last request is over a minute old; not during a reply; never throws.
+  advance(2 * M); const p0 = pingAt.length; sp.start(); // a real reply: that's the last request
+  sp.prewarm(); assert.equal(pingAt.length, p0, 'not during a reply, nor right after one');
+  local.at(-1).onEnd();
+  advance(30_000); sp.prewarm(); assert.equal(pingAt.length, p0, 'within a minute of the last request: nothing');
+  advance(31_000); sp.prewarm(); assert.equal(pingAt.length, p0 + 1, 'over a minute since the last request: a throwaway');
+  sp.stopWarm();
+}
+{ // Prewarm before anything was used: pings at once, and a constructor that throws is swallowed.
+  const made = [], logged = [];
+  const sp = createSpeaker({ emit: () => {}, log: (k) => logged.push(k), FishVoiceImpl: FakeVoice, account: async () => ({ ok: true }), beatPhrases: [], bundled: () => null,
+    LocalVoiceImpl: class { constructor() { made.push(this); } open() { return this; } say() {} end() {} abort() {} }, localStatus: async () => ({ ok: true, voices: [] }) });
+  sp.setProvider('voicestudio'); await tick();
+  sp.prewarm(); assert.equal(made.length, 1, 'the first talk or typing wakes VoiceStudio');
+  sp.prewarm(); assert.equal(made.length, 1, 'not again within a minute');
+  const bad = createSpeaker({ emit: () => {}, log: (k) => logged.push(k), FishVoiceImpl: FakeVoice, account: async () => ({ ok: true }), beatPhrases: [], bundled: () => null,
+    LocalVoiceImpl: class { constructor() { throw new Error('boom'); } }, localStatus: async () => ({ ok: true, voices: [] }) });
+  bad.setProvider('voicestudio'); await tick();
+  assert.doesNotThrow(() => bad.prewarm());
+  assert.deepEqual([...new Set(logged)], ['voicestudio_status'], 'a failed throwaway is never logged');
+  console.log('speaker keep-warm tests: passed');
+}
+{ // What SpeechText is given: VoiceStudio's early first chunk and its spoken cap (short by default); the rest as before.
+  const sp = createSpeaker({ emit: () => {}, FishVoiceImpl: FakeVoice, account: async () => ({ ok: true, credit: 1 }), beatPhrases: [], bundled: () => null,
+    LocalVoiceImpl: class { open() { return this; } say() {} end() {} abort() {} }, localStatus: async () => ({ ok: true, voices: [] }) });
+  assert.deepEqual(sp.localOpts(), { early: false, cap: 0 }, 'Fish, no key: as before');
+  sp.setProvider('voicestudio'); await tick();
+  assert.equal(sp.studioSpeak, 'short');
+  assert.deepEqual(sp.localOpts(), { early: true, cap: 160 }, 'short by default');
+  sp.setStudioSpeak('medium'); assert.deepEqual(sp.localOpts(), { early: true, cap: 320 });
+  sp.setStudioSpeak('full'); assert.deepEqual(sp.localOpts(), { early: true, cap: 0 });
+  sp.setStudioSpeak('huge'); assert.equal(sp.studioSpeak, 'full', 'unknown modes are ignored');
+  sp.setStudioSpeak('short');
+  sp.setProvider('fish'); assert.deepEqual(sp.localOpts(), { early: false, cap: 0 }, 'back on Fish: as before');
+  sp.setProvider('gemini'); assert.deepEqual(sp.localOpts(), { early: false, cap: 0 }, 'Gemini: as before');
+  console.log('speaker localOpts tests: passed');
+}
+
+{ // The face follows the voice: a sentence with a new feeling is marked with where it starts (cues and beats counted right).
+  const { sp, out } = setup({ ok: true, credit: 4.5 }, ['On it.'], () => new Map([['On it.', { rate: 44100, pcm: 'AAA=' }]]));
+  sp.setKey('k'); await tick();
+  const r = sp.start();
+  assert.equal(r.beat(), true);
+  r.say('[excited] We did it!'); r.say('[happy] Really.'); r.say('Next up.'); r.say('[sad] Oh.'); r.end();
+  const feels = out.filter((m) => 'feel' in m).map(({ feel, at }) => [feel, at]);
+  assert.deepEqual(feels, [['joy', 7], [null, 26], ['sad', 35]], 'the beat and spoken text before each; no repeat; no cue is a plain face');
+  assert.ok(out.filter((m) => 'feel' in m).every((m) => m.id === r.id && m.kind === 'speech'));
+  console.log('speaker feeling tests: passed');
 }

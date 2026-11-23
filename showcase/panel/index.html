@@ -20,8 +20,10 @@
       <button class="px btn ghost mini" type="button" id="head-update" hidden></button>
       <!-- Quit, at the end of the row: the first press turns it into Confirm for a few seconds. -->
       <button class="link danger arm head-quit" type="button" id="head-quit" aria-pressed="false" aria-label="Quit Roamies"><span class="no" aria-hidden="true">Quit</span><span class="yes" aria-hidden="true">Confirm</span></button>
+      <!-- Close, last on the row: some Linux desktops never say the panel lost focus, so clicking away can't close it (#135). -->
+      <button class="link ibtn head-close" type="button" id="head-close" aria-label="Close the panel" data-tip="Close (Esc)"></button>
     </div>
-    <p class="by" id="by">By Ken Kai</p>
+    <p class="by" id="by"><a href="https://github.com/KenKaiii/Roamies">Made by AngelM1015 (Fork)</a> · original Roamies by Ken Kai</p>
     <!-- What it's doing and the model, for screen readers; on screen the LED shows it. -->
     <p class="sr-only" id="now" role="status" aria-live="polite"></p>
     <p class="saying" id="saying" aria-hidden="true"></p>
@@ -34,15 +36,12 @@
     <ul class="nav">
       <li><button class="px navi" type="button" id="nav-home" data-page="home" aria-controls="pane-home" aria-current="page">Home<span class="dot" aria-hidden="true"></span></button></li>
       <li><button class="px navi" type="button" id="nav-memory" data-page="memory" aria-controls="pane-memory">Memory<span class="dot" aria-hidden="true"></span></button></li>
-    </ul>
-    <p class="side-label" id="side-settings">Settings</p>
-    <ul class="nav" aria-labelledby="side-settings">
+      <li><button class="px navi" type="button" id="nav-abilities" data-page="abilities" aria-controls="pane-abilities">Abilities<span class="dot" aria-hidden="true"></span></button></li>
       <li><button class="px navi" type="button" id="nav-model" data-page="model" aria-controls="pane-model">Model<span class="dot" aria-hidden="true"></span></button></li>
       <li><button class="px navi" type="button" id="nav-appearance" data-page="appearance" aria-controls="pane-appearance">Appearance<span class="dot" aria-hidden="true"></span></button></li>
       <li><button class="px navi" type="button" id="nav-speaking" data-page="speaking" aria-controls="pane-speaking">Speaking<span class="dot" aria-hidden="true"></span></button></li>
       <li><button class="px navi" type="button" id="nav-listening" data-page="listening" aria-controls="pane-listening">Listening<span class="dot" aria-hidden="true"></span></button></li>
       <li><button class="px navi" type="button" id="nav-shortcuts" data-page="shortcuts" aria-controls="pane-shortcuts">Shortcuts<span class="dot" aria-hidden="true"></span></button></li>
-      <li><button class="px navi" type="button" id="nav-routines" data-page="routines" aria-controls="pane-routines">Routines<span class="dot" aria-hidden="true"></span></button></li>
       <li><button class="px navi" type="button" id="nav-general" data-page="general" aria-controls="pane-general">General<span class="dot" aria-hidden="true"></span></button></li>
       <li><button class="px navi" type="button" id="nav-about" data-page="about" aria-controls="pane-about">About<span class="dot" aria-hidden="true"></span></button></li>
       <li><button class="px navi" type="button" id="nav-whatsnew" data-page="whatsnew" aria-controls="pane-whatsnew">What's new<span class="dot" aria-hidden="true"></span></button></li>
@@ -51,12 +50,12 @@
   <main class="body">
     <section class="pane" id="pane-home" aria-labelledby="nav-home"></section>
     <section class="pane" id="pane-memory" aria-labelledby="nav-memory" hidden></section>
+    <section class="pane" id="pane-abilities" aria-labelledby="nav-abilities" hidden></section>
     <section class="pane" id="pane-model" aria-labelledby="nav-model" hidden></section>
     <section class="pane" id="pane-appearance" aria-labelledby="nav-appearance" hidden></section>
     <section class="pane" id="pane-speaking" aria-labelledby="nav-speaking" hidden></section>
     <section class="pane" id="pane-listening" aria-labelledby="nav-listening" hidden></section>
     <section class="pane" id="pane-shortcuts" aria-labelledby="nav-shortcuts" hidden></section>
-    <section class="pane" id="pane-routines" aria-labelledby="nav-routines" hidden></section>
     <section class="pane" id="pane-general" aria-labelledby="nav-general" hidden></section>
     <section class="pane" id="pane-about" aria-labelledby="nav-about" hidden></section>
     <section class="pane" id="pane-whatsnew" aria-labelledby="nav-whatsnew" hidden></section>

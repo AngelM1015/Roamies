@@ -1,19 +1,21 @@
 [package]
 name = "roamies"
-version = "0.1.41"
+version = "0.1.51"
 edition = "2021"
+# src/bin holds the Linux overlay host too; the Tauri CLI needs to know which binary is the app.
+default-run = "roamies"
 license = "AGPL-3.0-only"
 description = "Roamies: AI desktop companions"
 repository = "https://github.com/KenKaiii/Roamies"
 homepage = "https://github.com/KenKaiii/Roamies"
 
 [build-dependencies]
-tauri-build = { version = "=2.7.4", features = [] }
+tauri-build = { version = "=2.7.5", features = [] }
 
 [dependencies]
-tauri = { version = "=2.12.5", features = ["tray-icon", "macos-private-api"] }
+tauri = { version = "=2.12.6", features = ["tray-icon", "macos-private-api"] }
 serde_json = "=1.0.154"
-global-hotkey = "=0.9.0"
+global-hotkey = "=0.10.0"
 tauri-plugin-single-instance = "=2.5.5"
 tauri-plugin-updater = "=2.14.1"
 
@@ -25,7 +27,10 @@ objc2-service-management = { version = "=0.3.2", default-features = false, featu
 # and the desktop portal on Wayland. All three are already in Cargo.lock through Tauri and its plugins.
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "=0.18.2"
-x11rb = "=0.13.2"
+gtk-layer-shell = { version = "=0.8.2", features = ["v0_6"] }
+webkit2gtk = { version = "=2.0.2", features = ["v2_40"] }
+javascriptcore-rs = "=1.1.2"
+x11rb = "=0.14.0"
 zbus = "=5.19.0"
 
 [profile.release]

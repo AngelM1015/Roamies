@@ -1,4 +1,4 @@
-// Character looks for the sidekick: Anime Girl, Sarah, Adrian and Rita X. Each is a head-and-shoulders hologram
+// Character looks for the sidekick: Anime Girl, Sarah, Adrian, Rita X, Ultren and GlayOS. Each is a hologram
 // in the LED palette that fades out at the bottom like the JARVIS globe's projector, with a face that blinks,
 // follows the cursor, talks with the real voice level and acts out moods. Hair moves with the body: the anime
 // girl's twin tails swing, Sarah's long hair sways, Adrian's quiff bounces, Rita's swept waves swing.
@@ -121,6 +121,59 @@
         rows: ['...hhhhh...', '..hhhhhhhh.', '.hhhssshhhh', '.hssssssshT', '.sssssssshT', '..ssssssshT', '...ssssshTt', '....zszhTt.', '..CCkwkCtCC'],
       },
     },
+    // Ultren: a chrome war machine, front on. A segmented skull with a crest down the middle, an angry brow
+    // over deep sockets with glowing slit eyes, hooks sweeping down from the temples, a long narrow jaw, a cabled neck
+    // and heavy armoured shoulders.
+    ultren: {
+      L: {
+        w: 29, cy: 14, fade: 5, eye: [2, 9], mouth: 17,
+        mouths: {
+          closed: ['00000'], talk1: ['00000', '03330', '.000.'], talk2: ['00000', '03430', '03430', '.000.'],
+          shout: ['0000000', '0344430', '0344430', '.00000.'], o: ['.000.', '03330', '.000.'], frown: ['.000.', '0...0'],
+          grin: ['0.....0', '.00000.', '..333..'], flat: ['00000'],
+        },
+        rows: [
+          '...........zssS', '.........zsshzS', '........zsshszS', '.......zsshsszS', '.......zshssszS', '.....h.zhsssszS',
+          '....zh.zssssszS', '....zh.z00ssszS', '....zh.z00000zS', '....z..z00000zS', '....z..zs0000zs', '....z..zss000zs',
+          '....z..zsSsszss', '....z...zhhzsss', '....z....zhzsss', '.....z...zhzsss', '.....z....zzsss', '......z...zssss',
+          '.......z...zsss', '........z...zss', '.............zs', '............hsh', '.........CCchsh', '.....kkkCCcchsh',
+          '...kccckCCcchsh', '..kcccckCCcchsh', '.kccccckCCccchk', 'kccccckCCcccchk', 'cccccckCCcccchk', 'cccccckCCcccchk',
+        ],
+      },
+      S: {
+        w: 17, cy: 8, fade: 3, eye: [2, 5], mouth: 11,
+        mouths: { closed: ['000'], talk1: ['000', '030'], talk2: ['000', '343', '000'], shout: ['000', '343', '343', '000'], o: ['0'], frown: ['.0.', '0.0'], grin: ['0.0', '030'], flat: ['000'] },
+        rows: ['......zsS', '....zshzS', '...zshszS', '...zhsszS', '.h.zssszS', '.z.z00szS', '.z.z000zs', '.z.zs00zs', '.z.zsszss', '..z.zhzss', '...z.zhss', '.....zsss', '.......zs', '......hsh', '..kkCchsh', 'kcckCCchk', 'kcckCCcck'],
+      },
+      X: {
+        w: 11, cy: 4, fade: 1, eye: [2, 3], mouth: 6,
+        mouths: { closed: ['000'], talk1: ['030'], talk2: ['333'], shout: ['333'], o: ['0'], frown: ['0'], grin: ['000'], flat: ['000'] },
+        rows: ['...zsS', '.zshzS', '.zsszS', '.z00zS', '.zsszs', '..zsss', '...zss', '....hs', '.kCChs'],
+      },
+    },
+    // GlayOS: her front view, a tall white pill of a head with a dark visor slot and one glowing eye, grey flaps at its
+    // sides, hanging from a dark cabled neck. No mouth: the eye does the talking.
+    glayos: {
+      L: {
+        w: 29, cy: 14, fade: 3, eye: [0, 12], mouth: null, oneEye: true,
+        patch: [[18, 14, '3']],
+        rows: [
+          '............hHhHh..h.........', '............hHhHh..h.........', '............hHhHh.h..........', '............hHhHh.h..........', '...........zhhhhhz...........', '..........zsSSS',
+          '........zssSSSS', '....zz.zsssssss', '....zz.zsssssss', '....zz.zsssss11', '....z..zssss100', '.......zssss100',
+          '.......zssss100', '.......zssss100', '.......zssss100', '.......zssss100', '.......zssss100', '.......zssss100',
+          '.......zssss100', '.......zssss100', '.......zssss100', '.......zssss100', '.......zssss100', '.......zssss100',
+          '.......zsssss11', '.......zsssssss', '.......zsssssss', '........zssssss', '.........zzssss', '...........zzzz',
+        ],
+      },
+      S: {
+        w: 17, cy: 8, fade: 3, eye: [0, 6], mouth: null, oneEye: true,
+        rows: ['......hhH', '......hhH', '......zhz', '.....zsSS', '.z.zsssss', 'zz.zsss11', 'z..zsss10', '...zsss10', '...zsss10', '...zsss10', '...zsss10', '...zsss10', '...zsss11', '...zsssss', '....zzsss', '......zzz', '.........'],
+      },
+      X: {
+        w: 11, cy: 4, fade: 1, eye: [0, 4], mouth: null, oneEye: true,
+        rows: ['....Hh', '...zzz', '..zsSS', '..zs11', '..zs10', '..zs10', '..zs11', '..zsss', '...zzz'],
+      },
+    },
     // Ken Kai, who made Roamies (shown on the About page, not a look): a textured dark fringe over faded sides,
     // and a hoodie with its drawstrings.
     ken: {
@@ -171,6 +224,19 @@
       L: { open: ['.22200', '00000.', '04110.', '01110.', '.222..'], wide: ['.22200', '00000.', '04110.', '01110.', '01110.', '.222..'], shut: ['......', '......', '....00', '00000.', '.0.0..'], happy: ['......', '......', '.000.0', '0...0.'], dizzy: ['0...0', '.0.0.', '..0..', '.0.0.', '0...0'], sleepy: ['......', '......', '......', '00000.', '....00'] },
       S: { open: ['00', '40'], wide: ['00', '40', '00'], shut: ['..', '00'], happy: ['.0.', '0.0'], dizzy: ['0.0', '.0.'], sleepy: ['..', '00'] },
       X: { open: ['0', '0'], wide: ['0', '0'], shut: ['.', '0'], happy: ['0'], dizzy: ['0'], sleepy: ['.', '0'] },
+    },
+    // Glowing slits in deep sockets, angled down to the middle.
+    ultren: {
+      L: { open: ['...44', '.4444', '4443.'], wide: ['..344', '44444', '44444', '.443.'], shut: ['...33', '333..'], happy: ['.....', '34444'], dizzy: ['3.3', '.4.', '3.3'], sleepy: ['.....', '33333'] },
+      S: { open: ['.4', '44'], wide: ['44', '44'], shut: ['..', '33'], happy: ['..', '44'], dizzy: ['3.', '.3'], sleepy: ['..', '33'] },
+      X: { open: ['4'], wide: ['4'], shut: ['3'], happy: ['4'], dizzy: ['4'], sleepy: ['3'] },
+    },
+    // One round eye, given as its right half from the centre column: a bright core in a glowing ring. It narrows
+    // when angry and dims when sad, having no brows.
+    glayos: {
+      L: { open: ['44', '44', '44'], wide: ['43', '44', '44', '44', '43'], shut: ['..', '..', '33'], happy: ['..', '3.', '.3'], dizzy: ['3.', '.3', '3.'], sleepy: ['..', '..', '22'], angry: ['..', '44', '..'], sad: ['..', '..', '33', '22'] },
+      S: { open: ['3', '4', '3'], wide: ['4', '4', '4', '4'], shut: ['.', '3'], happy: ['.', '4'], dizzy: ['3', '4'], sleepy: ['.', '.', '2'], angry: ['.', '4'], sad: ['.', '.', '3'] },
+      X: { open: ['4'], wide: ['4'], shut: ['2'], happy: ['4'], dizzy: ['4'], sleepy: ['2'], angry: ['4'], sad: ['2'] },
     },
     ken: {
       L: { open: ['000', '040'], wide: ['000', '040', '000'], shut: ['...', '000'], happy: ['.0.', '0.0'], dizzy: ['0.0', '.0.', '0.0'], sleepy: ['...', '000'] },
@@ -269,14 +335,17 @@
     face(c) {
       const { G, a, x, y, st, size, lvl } = c;
       const lx = Math.round(clamp(st.look[0], -1, 1) * (size === 'L' ? 1.2 : 0.6)), ly = Math.round(clamp(st.look[1], -1, 1) * (size === 'L' ? 0.8 : 0.4));
-      const state = st.dizzy > 0.5 ? 'dizzy' : st.sleepy > 0.5 ? 'sleepy' : st.happy > 0.5 ? 'happy' : st.open < 0.35 ? 'shut' : st.wide > 0.5 ? 'wide' : 'open';
-      const E = EYES[who][size][state];
+      // With no mouth, the eye talks: it opens wide on the loud parts of the voice.
+      const talks = a.mouth == null && st.mode === 'talk' && lvl > 0.45;
+      const state = st.dizzy > 0.5 ? 'dizzy' : st.sleepy > 0.5 ? 'sleepy' : st.happy > 0.5 ? 'happy' : st.open < 0.35 && !talks ? 'shut' : st.wide > 0.5 || talks ? 'wide' : 'open';
+      // With no brows (the one-eyed head), the eye itself narrows when angry and dims when sad.
+      const E = (state === 'open' && a.oneEye && EYES[who][size][st.brow]) || EYES[who][size][state];
       const ex = a.eye[0], ey = y + a.eye[1] + ly - (state === 'wide' ? 1 : 0);
       stamp(G, E, x + ex + lx, ey);
       stamp(G, E, x - ex + lx, ey, true);
       // Brows (where no hair covers them), from the agent's pose or the act.
       const brow = st.brow;
-      if (size !== 'X' && (brow || who === 'adrian' || who === 'ken')) {
+      if (size !== 'X' && !a.oneEye && (brow || who === 'adrian' || who === 'ken')) {
         const by = ey - (size === 'L' ? 2 : 1) - (brow === 'raised' ? 1 : 0), bw = size === 'L' ? 4 : 2;
         for (const s of [1, -1]) for (let i = 0; i < bw; i++) {
           const bx = x + s * (ex + i) + lx;
@@ -290,9 +359,12 @@
         const bx = x + s * a.blush[0] + lx, by = y + a.blush[1] + ly;
         if (size === 'L') { set(G, bx, by, 2); set(G, bx - s, by, 2); } else set(G, bx, by, 2);
       }
+      // No mouth (the one-eyed head): nothing more to draw; its eye opens wide on the loud parts instead (see eyeState).
+      if (a.mouth == null) return;
       // Mouth: from the voice while it talks, else the pose or act.
       let mouth = st.mouth;
-      if (st.mode === 'talk') mouth = lvl > 0.62 ? 'talk2' : lvl > 0.22 ? 'talk1' : 'closed';
+      // Between words, the voice's feeling shows (a frown when it's sad, an o when surprised…).
+      if (st.mode === 'talk') mouth = lvl > 0.62 ? 'talk2' : lvl > 0.22 ? 'talk1' : st.rest && MOUTHS[size][st.rest] ? st.rest : 'closed';
       if (!mouth || !MOUTHS[size][mouth]) mouth = st.happy > 0.5 ? 'grin' : 'closed';
       if (st.sleepy > 0.5) mouth = size === 'L' ? 'o' : 'flat';
       const M = a.mouths?.[mouth] ?? MOUTHS[size][mouth];
@@ -325,5 +397,5 @@
     },
   });
 
-  R.people = { anime: person('anime'), sarah: person('sarah'), adrian: person('adrian'), rita: person('rita'), ken: person('ken') };
+  R.people = { anime: person('anime'), sarah: person('sarah'), adrian: person('adrian'), rita: person('rita'), ultren: person('ultren'), glayos: person('glayos'), ken: person('ken') };
 })();

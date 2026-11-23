@@ -26,6 +26,9 @@ assert.match(text, /can't see or read the screen, click or type in apps, draw/);
 assert.match(text, /don't try it and don't pretend: say .*Lite mode is on.*switching Lite mode off on the Model page in the panel \(click my icon\)/s);
 assert.match(text, /"- " lines: they show on a card/);
 assert.match(voice, /talk out loud.*no markdown/s); assert.doesNotMatch(voice, /\*\*bold\*\*/);
+// The look's own way of talking, else the default.
+assert.match(liteSystem({ ...o, style: 'deadpan and clinical.' }), /Personality: deadpan and clinical\. In your own way/);
+assert.match(text, /Personality: warm, funny, a little cheeky\./);
 
 // Local models: Lite needs half the memory; small models are told about Lite mode.
 assert.equal(LITE_MIN_CONTEXT * 2, MIN_CONTEXT);

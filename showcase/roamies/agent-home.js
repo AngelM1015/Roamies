@@ -32,7 +32,7 @@
     calc(var(--s) * 2) calc(100% - var(--s)), var(--s) calc(100% - var(--s)), var(--s) calc(100% - var(--s) * 2),
     0 calc(100% - var(--s) * 2), 0 calc(var(--s) * 2), var(--s) calc(var(--s) * 2), var(--s) var(--s), calc(var(--s) * 2) var(--s));
   pointer-events: auto; cursor: default; box-sizing: border-box; padding: 2px; background: var(--line-hot); color: #051214; clip-path: var(--notch);
-  font: 400 12px/1.45 "Martian Mono", ui-monospace, Menlo, monospace;
+  font: 400 12px/1.45 "Martian Mono", "Roamies Arabic", ui-monospace, Menlo, monospace;
   filter: drop-shadow(0 0 10px rgba(120, 255, 226, .18)) drop-shadow(0 8px 22px rgba(0, 0, 0, .45)); }
 .ah-in, .ahs-in { background: rgba(5, 18, 20, .97); color: var(--ink); clip-path: var(--notch); }
 /* Panels unfold on the way in and only dissolve on the way out: the entrance is a one-way keyframe, the exit
@@ -68,7 +68,7 @@
 /* Stop asks first, in the same spot (like the panel's X buttons): pressed, it turns into Confirm for 4 s. */
 .ah-x { min-width: 26px; width: auto; }
 .ah-x > .yes { display: none; }
-.ah-x[aria-pressed="true"] { padding: 0 8px; background: #ffb4a8; color: #032722; font: 700 11px/1.25 "Martian Mono", ui-monospace, Menlo, monospace; animation: ah-arm 600ms steps(2, end) 2; }
+.ah-x[aria-pressed="true"] { padding: 0 8px; background: #ffb4a8; color: #032722; font: 700 11px/1.25 "Martian Mono", "Roamies Arabic", ui-monospace, Menlo, monospace; animation: ah-arm 600ms steps(2, end) 2; }
 .ah-x[aria-pressed="true"]:hover { background: #ffcbc2; color: #032722; }
 .ah-x[aria-pressed="true"] > .no { display: none; }
 .ah-x[aria-pressed="true"] > .yes { display: inline; }
@@ -84,7 +84,7 @@
 .ah-q { margin: 0 0 8px; font-size: 11.5px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .ah-btns { display: flex; gap: 8px; }
 .ah-chip, .ahs-chip { all: unset; box-sizing: border-box; height: 26px; padding: 0 11px; display: inline-grid; place-items: center; cursor: pointer;
-  font: 700 11px/1.25 "Martian Mono", ui-monospace, Menlo, monospace; white-space: nowrap;
+  font: 700 11px/1.25 "Martian Mono", "Roamies Arabic", ui-monospace, Menlo, monospace; white-space: nowrap;
   --c: 4px; clip-path: polygon(var(--c) 0, calc(100% - var(--c)) 0, 100% var(--c), 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, var(--c) 100%, 0 calc(100% - var(--c)), 0 var(--c));
   background: #0b2224; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--accent); transition: background-color .12s var(--ease), color .12s var(--ease); }
 .ah-chip:hover, .ahs-chip:hover { background: #12393a; color: var(--ink); }
@@ -301,6 +301,8 @@
   }
   const anyLive = () => [...rows.values()].some((r) => !r.leaving);
   let goneT = 0;
+  // The summon toggle sent the whole corner away: rows and shelves keep going underneath, unseen.
+  let away = false;
   function showHome() {
     if (anyLive()) {
       clearTimeout(goneT);
@@ -408,7 +410,7 @@
     setTimeout(() => h.c.remove(), 220);
   }
   function launch(row, from) {
-    if (reduce() || (!from && !hatch)) { endHatch(); openRow(row); return; }
+    if (away || reduce() || (!from && !hatch)) { endHatch(); openRow(row); return; }
     row.hidden = true;
     const f = hatch ?? flyCanvas(from);
     if (hatch === f) hatch = null;
@@ -456,8 +458,11 @@
   // ---------- events from the sidecar ----------
   const api = {
     send: null,
-    hatch(at) { mount(); startHatch(at); },
+    hatch(at) { mount(); if (!away) startHatch(at); },
     hatchOff: endHatch,
+    // Ctrl+Alt+S: the corner goes with the sidekick and comes back on the next summon, even if agents ran meanwhile.
+    hide() { away = true; endHatch(); col.style.display = 'none'; },
+    show() { away = false; col.style.display = ''; place(); showHome(); },
     event(e, { from = null } = {}) {
       mount();
       const a = e.agent;
